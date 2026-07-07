@@ -1,0 +1,6 @@
+name: astrbot_plugin_juben_npc
+display_name: 剧本杀 NPC 数据库
+desc: 为群聊剧本杀模式提供 NPC 查询、星币、每日打卡、状态栏、抽奖和九宫格物品栏。
+version: v1.0.0
+author: Codex
+repo: ""
