@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>剧本杀 NPC 运营面板</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>剧本杀 NPC 运营面板</h1>
+          <p>新增角色、上传皮肤图片、修改奖池信息，并把指定角色发给玩家。</p>
+        </div>
+        <button id="refresh" class="secondary">刷新</button>
+      </header>
+
+      <section class="layout">
+        <aside class="panel list-panel">
+          <div class="panel-head">
+            <h2>角色与皮肤</h2>
+            <button id="new-character">新增</button>
+          </div>
+          <div id="character-list" class="character-list"></div>
+        </aside>
+
+        <section class="panel editor-panel">
+          <div class="panel-head">
+            <h2>编辑角色</h2>
+            <span id="save-state"></span>
+          </div>
+
+          <form id="character-form" class="form-grid">
+            <label>
+              ID
+              <input name="id" required placeholder="blue_hour_cafe" />
+            </label>
+            <label>
+              名称
+              <input name="name" required placeholder="蓝时咖啡" />
+            </label>
+            <label>
+              本体/系列
+              <input name="base" placeholder="蓝时咖啡" />
+            </label>
+            <label>
+              皮肤名
+              <input name="skin" placeholder="Winter Issue" />
+            </label>
+            <label>
+              稀有度
+              <select name="star">
+                <option>SSR</option>
+                <option>SR</option>
+                <option>R</option>
+              </select>
+            </label>
+            <label>
+              主色
+              <input name="color0" type="color" value="#6c8cff" />
+            </label>
+            <label>
+              辅色
+              <input name="color1" type="color" value="#f4d35e" />
+            </label>
+            <label>
+              背景色
+              <input name="color2" type="color" value="#10172a" />
+            </label>
+            <label class="wide">
+              获取途径
+              <input name="route" placeholder="运营后台添加 / 月度皮肤池" />
+            </label>
+            <label class="wide">
+              经验加成
+              <input name="bonus" placeholder="推理经验 +10%" />
+            </label>
+            <label class="wide">
+              介绍
+              <textarea name="intro" rows="3"></textarea>
+            </label>
+            <label>
+              2星技能名
+              <input name="skill0" />
+            </label>
+            <label>
+              2星技能描述
+              <input name="skill0Desc" />
+            </label>
+            <label>
+              3星技能名
+              <input name="skill1" />
+            </label>
+            <label>
+              3星技能描述
+              <input name="skill1Desc" />
+            </label>
+            <label>
+              5星技能名
+              <input name="skill2" />
+            </label>
+            <label>
+              5星技能描述
+              <input name="skill2Desc" />
+            </label>
+            <label>
+              图片文件
+              <input name="image" placeholder="blue_hour_cafe.png" />
+            </label>
+            <label class="checkline">
+              <input name="featured" type="checkbox" />
+              加入月度大奖候选
+            </label>
+          </form>
+
+          <div class="upload-row">
+            <input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp" />
+            <button id="upload-button">上传图片</button>
+            <button id="save-button">保存角色</button>
+            <button id="delete-button" class="danger">删除角色</button>
+          </div>
+
+          <div class="preview">
+            <img id="preview-image" alt="" />
+            <div>
+              <strong id="preview-title">未选择角色</strong>
+              <p id="preview-subtitle">上传后会自动写入“图片文件”。</p>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel grant-panel">
+        <div class="panel-head">
+          <h2>赠送角色</h2>
+          <span>选择已记录玩家，或手动填写群/用户 ID。</span>
+        </div>
+        <div class="grant-grid">
+          <label>
+            已记录玩家
+            <select id="known-player"></select>
+          </label>
+          <label>
+            群/会话 Scope ID
+            <input id="grant-scope" placeholder="群号或 session id" />
+          </label>
+          <label>
+            用户 ID
+            <input id="grant-user" placeholder="QQ / 平台用户 ID" />
+          </label>
+          <label>
+            昵称
+            <input id="grant-name" placeholder="可选" />
+          </label>
+          <label>
+            角色
+            <select id="grant-character"></select>
+          </label>
+          <button id="grant-button">赠送</button>
+        </div>
+      </section>
+
+      <div id="toast" class="toast"></div>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

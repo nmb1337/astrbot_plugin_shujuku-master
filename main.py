@@ -1,7 +1,9 @@
 import json
-import math
+import inspect
 import random
 import re
+import shutil
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,6 +12,21 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+
+try:
+    from astrbot.api.web import (
+        PluginUploadFile,
+        error_response,
+        file_response,
+        json_response,
+        request,
+    )
+except Exception:
+    PluginUploadFile = None
+    request = None
+    json_response = None
+    error_response = None
+    file_response = None
 
 
 LEVEL_REQUIREMENTS = [1000, 2000, 3000, 4000, 5000]
@@ -20,161 +37,250 @@ CHECKIN_REWARDS = [
     ("星币", 3, 20),
     ("免费入场券", 1, 5),
 ]
+DOWNLOADABLE_FONTS = [
+    (
+        "NotoSansCJKsc-Regular.otf",
+        "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    ),
+    (
+        "NotoSansCJKsc-Bold.otf",
+        "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf",
+    ),
+]
+PLUGIN_NAME = "astrbot_plugin_juben_npc"
 
-NPCS: List[Dict[str, Any]] = [
+
+DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     {
         "id": "rin",
         "name": "星见凛",
+        "base": "星见凛",
+        "skin": "默认",
         "star": "SSR",
         "route": "月度大奖池 / 新人初始赠送",
         "bonus": "推理经验 +10%",
         "intro": "来自星轨剧团的侦探少女，擅长从细碎证词里找出不合拍的音符。",
-        "skills": [
-            ("星屑直觉", "2星解锁：调查阶段额外获得一条线索提示。"),
-            ("幕间追问", "3星解锁：每局可指定一次追问方向。"),
-            ("终幕推演", "5星解锁：结算经验额外 +20%。"),
-        ],
-        "colors": ("#6c8cff", "#f4d35e", "#10172a"),
+        "skills": [["星屑直觉", "调查阶段额外获得一条线索提示。"], ["幕间追问", "每局可指定一次追问方向。"], ["终幕推演", "结算经验额外 +20%。"]],
+        "colors": ["#6c8cff", "#f4d35e", "#10172a"],
+        "image": "rin.png",
+        "featured": True,
     },
     {
         "id": "yue",
         "name": "月白",
+        "base": "月白",
+        "skin": "默认",
         "star": "SR",
         "route": "月度大奖池 / 抽奖概率获得",
         "bonus": "社交经验 +8%",
         "intro": "温柔但危险的情报商，越是安静的房间，越藏着她想要的答案。",
-        "skills": [
-            ("银月侧写", "2星解锁：社交检定经验提升。"),
-            ("无声交易", "3星解锁：礼物转化经验 +10%。"),
-            ("月影同盟", "5星解锁：队友结算加成 +5%。"),
-        ],
-        "colors": ("#9ad7ff", "#f7f7ff", "#213047"),
+        "skills": [["银月侧写", "社交检定经验提升。"], ["无声交易", "礼物转化经验 +10%。"], ["月影同盟", "队友结算加成 +5%。"]],
+        "colors": ["#9ad7ff", "#f7f7ff", "#213047"],
+        "image": "yue.png",
+        "featured": True,
     },
     {
         "id": "mika",
         "name": "赤羽弥香",
+        "base": "赤羽弥香",
+        "skin": "默认",
         "star": "SSR",
         "route": "月度大奖池限定",
         "bonus": "战斗经验 +12%",
         "intro": "红发行动派，喜欢用最直接的办法把谜题砸开，再把碎片拼回真相。",
-        "skills": [
-            ("焰羽突入", "2星解锁：行动类任务经验增加。"),
-            ("破局连击", "3星解锁：抽奖礼物经验 +12%。"),
-            ("红莲审判", "5星解锁：大奖池角色经验 +25%。"),
-        ],
-        "colors": ("#ff6464", "#ffd166", "#2a1018"),
+        "skills": [["焰羽突入", "行动类任务经验增加。"], ["破局连击", "抽奖礼物经验 +12%。"], ["红莲审判", "大奖池角色经验 +25%。"]],
+        "colors": ["#ff6464", "#ffd166", "#2a1018"],
+        "image": "mika.png",
+        "featured": True,
     },
     {
         "id": "noa",
         "name": "诺娅",
+        "base": "诺娅",
+        "skin": "默认",
         "star": "R",
         "route": "常驻抽奖 / 活动兑换",
         "bonus": "通用经验 +5%",
         "intro": "负责记录档案的机械少女，表情很少，但数据库里从不遗漏任何异常。",
-        "skills": [
-            ("档案索引", "2星解锁：查看 NPC 信息时显示额外备注。"),
-            ("数据补正", "3星解锁：每日打卡星币 +1 概率提升。"),
-            ("零点归档", "5星解锁：每月首次抽奖半价。"),
-        ],
-        "colors": ("#62d6c7", "#e8f7ff", "#102825"),
+        "skills": [["档案索引", "查看 NPC 信息时显示额外备注。"], ["数据补正", "每日打卡星币 +1 概率提升。"], ["零点归档", "每月首次抽奖半价。"]],
+        "colors": ["#62d6c7", "#e8f7ff", "#102825"],
+        "image": "noa.png",
+        "featured": False,
     },
     {
         "id": "iori",
         "name": "伊织",
+        "base": "伊织",
+        "skin": "默认",
         "star": "SR",
         "route": "常驻抽奖",
         "bonus": "观察经验 +8%",
         "intro": "旧书店的看板娘，能从纸张气味和墨迹深浅里读到时间留下的暗语。",
-        "skills": [
-            ("书页暗纹", "2星解锁：线索阅读经验增加。"),
-            ("旧章回声", "3星解锁：失败结算保底经验提升。"),
-            ("未署名真相", "5星解锁：隐藏线索概率提升。"),
-        ],
-        "colors": ("#c89b6d", "#fff0d6", "#2b2017"),
+        "skills": [["书页暗纹", "线索阅读经验增加。"], ["旧章回声", "失败结算保底经验提升。"], ["未署名真相", "隐藏线索概率提升。"]],
+        "colors": ["#c89b6d", "#fff0d6", "#2b2017"],
+        "image": "iori.png",
+        "featured": False,
     },
     {
         "id": "sora",
         "name": "空",
+        "base": "空",
+        "skin": "默认",
         "star": "R",
         "route": "常驻抽奖 / 免费入场券活动",
         "bonus": "移动经验 +6%",
         "intro": "轻装潜入者，总是笑着说自己只是路过，但每次路过都能带走关键证据。",
-        "skills": [
-            ("轻身步", "2星解锁：探索经验增加。"),
-            ("屋顶视野", "3星解锁：获得额外场景提示。"),
-            ("夜风归途", "5星解锁：消耗入场券时经验提升。"),
-        ],
-        "colors": ("#7bd88f", "#efffdc", "#122816"),
+        "skills": [["轻身步", "探索经验增加。"], ["屋顶视野", "获得额外场景提示。"], ["夜风归途", "消耗入场券时经验提升。"]],
+        "colors": ["#7bd88f", "#efffdc", "#122816"],
+        "image": "sora.png",
+        "featured": False,
     },
     {
         "id": "kuro",
         "name": "黑泽莲",
+        "base": "黑泽莲",
+        "skin": "默认",
         "star": "SSR",
         "route": "月度大奖池限定",
         "bonus": "心理经验 +12%",
         "intro": "冷静的心理医生，擅长让谎言在沉默里自己露出破绽。",
-        "skills": [
-            ("微表情", "2星解锁：审讯经验增加。"),
-            ("沉默处方", "3星解锁：可减少一次错误惩罚。"),
-            ("深渊共鸣", "5星解锁：心理线结算经验 +30%。"),
-        ],
-        "colors": ("#5e5ce6", "#b8b5ff", "#111122"),
+        "skills": [["微表情", "审讯经验增加。"], ["沉默处方", "可减少一次错误惩罚。"], ["深渊共鸣", "心理线结算经验 +30%。"]],
+        "colors": ["#5e5ce6", "#b8b5ff", "#111122"],
+        "image": "kuro.png",
+        "featured": True,
     },
     {
         "id": "hana",
         "name": "花梨",
+        "base": "花梨",
+        "skin": "默认",
         "star": "R",
         "route": "常驻抽奖",
         "bonus": "治愈经验 +5%",
         "intro": "医学院实习生，随身携带糖果、绷带，以及一套过分锋利的推理逻辑。",
-        "skills": [
-            ("急救包", "2星解锁：团队支援经验增加。"),
-            ("甜味安抚", "3星解锁：打卡获得礼物概率提升。"),
-            ("白花宣誓", "5星解锁：队友失败时返还少量经验。"),
-        ],
-        "colors": ("#ff9ac8", "#fff1f6", "#321322"),
+        "skills": [["急救包", "团队支援经验增加。"], ["甜味安抚", "打卡获得礼物概率提升。"], ["白花宣誓", "队友失败时返还少量经验。"]],
+        "colors": ["#ff9ac8", "#fff1f6", "#321322"],
+        "image": "hana.png",
+        "featured": False,
     },
     {
         "id": "akito",
         "name": "晓斗",
+        "base": "晓斗",
+        "skin": "默认",
         "star": "SR",
         "route": "常驻抽奖 / 活动兑换",
         "bonus": "机关经验 +8%",
         "intro": "钟表匠少年，迷恋所有会转动的机关，也擅长让时间为自己作证。",
-        "skills": [
-            ("齿轮听诊", "2星解锁：机关检定经验增加。"),
-            ("倒转秒针", "3星解锁：每日一次小额经验补偿。"),
-            ("零时钟塔", "5星解锁：机关线结算经验 +25%。"),
-        ],
-        "colors": ("#f6b93b", "#e9f5ff", "#2a210d"),
+        "skills": [["齿轮听诊", "机关检定经验增加。"], ["倒转秒针", "每日一次小额经验补偿。"], ["零时钟塔", "机关线结算经验 +25%。"]],
+        "colors": ["#f6b93b", "#e9f5ff", "#2a210d"],
+        "image": "akito.png",
+        "featured": False,
+    },
+    {
+        "id": "blue_hour_cafe",
+        "name": "蓝时咖啡",
+        "base": "蓝时咖啡",
+        "skin": "Winter Issue",
+        "star": "SSR",
+        "route": "运营后台添加 / 月度皮肤池",
+        "bonus": "推理经验 +12%",
+        "intro": "银发女仆在蓝色午后里守着窗边席位，甜点、红茶和冰冷剑锋都摆放得恰到好处。",
+        "skills": [["午后礼仪", "社交与推理经验提升。"], ["蓝调侍奉", "礼物转化经验 +15%。"], ["寒光茶歇", "月度皮肤结算经验 +25%。"]],
+        "colors": ["#7d9fc2", "#eaf4ff", "#1c2a3f"],
+        "image": "blue_hour_cafe.png",
+        "featured": True,
+    },
+    {
+        "id": "noble_afternoon",
+        "name": "贵族下午茶",
+        "base": "贵族下午茶",
+        "skin": "Chess Strategy",
+        "star": "SSR",
+        "route": "运营后台添加 / 月度皮肤池",
+        "bonus": "策略经验 +12%",
+        "intro": "棋盘上的每一步都像一封无声邀请，她从容地把局势推进到最优雅的将死。",
+        "skills": [["棋谱预判", "机关与策略经验提升。"], ["临界一步", "失败结算保底经验提升。"], ["贵族终局", "高星剧本结算经验 +25%。"]],
+        "colors": ["#31517f", "#f3d98a", "#2a2430"],
+        "image": "noble_afternoon.png",
+        "featured": True,
+    },
+    {
+        "id": "cafe_lumiere",
+        "name": "红馆流明",
+        "base": "红馆流明",
+        "skin": "Cafe Lumiere",
+        "star": "SR",
+        "route": "运营后台添加 / 活动兑换",
+        "bonus": "社交经验 +10%",
+        "intro": "红色咖啡馆里，猫耳女仆以笑容招待来客，也用敏锐观察记录每一次停顿。",
+        "skills": [["红茶礼节", "社交经验提升。"], ["双影招待", "组队结算额外获得经验。"], ["灯影谢幕", "活动剧本经验 +20%。"]],
+        "colors": ["#8b2531", "#f4dfd8", "#2b0f14"],
+        "image": "cafe_lumiere.png",
+        "featured": False,
+    },
+    {
+        "id": "ash_silver_blade",
+        "name": "灰堡银刃",
+        "base": "灰堡银刃",
+        "skin": "Silver Blade",
+        "star": "SSR",
+        "route": "运营后台添加 / 月度大奖池",
+        "bonus": "战斗经验 +14%",
+        "intro": "黑衣少女坐在灰堡废墟里，银刃立于身侧，安静得像一场还未开始的审判。",
+        "skills": [["灰堡伏击", "战斗线经验提升。"], ["银刃处决", "大奖重复转化经验提升。"], ["冷焰归鞘", "战斗结算经验 +30%。"]],
+        "colors": ["#505866", "#dce6f0", "#111419"],
+        "image": "ash_silver_blade.png",
+        "featured": True,
+    },
+    {
+        "id": "blue_cafe_morning",
+        "name": "蓝咖啡晨光",
+        "base": "蓝咖啡晨光",
+        "skin": "Cafe Morning",
+        "star": "SR",
+        "route": "运营后台添加 / 皮肤池",
+        "bonus": "观察经验 +10%",
+        "intro": "晨光落在白瓷杯沿，银发女仆端起咖啡，仿佛连线索也被阳光洗得透明。",
+        "skills": [["晨光注视", "观察经验提升。"], ["白瓷回声", "礼物经验小幅提升。"], ["蓝窗独白", "探索结算经验 +20%。"]],
+        "colors": ["#a8c6df", "#f7fbff", "#26384c"],
+        "image": "blue_cafe_morning.png",
+        "featured": False,
     },
 ]
 
-NPC_BY_NAME = {npc["name"]: npc for npc in NPCS}
-NPC_BY_ID = {npc["id"]: npc for npc in NPCS}
 
-
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀 NPC 数据库、星币、打卡、状态栏与抽奖插件", "1.0.0")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀 NPC 数据库、角色皮肤、星币、打卡、状态栏与抽奖插件", "1.1.0")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.plugin_dir = Path(__file__).parent
         self.data_dir = self.plugin_dir / "data"
         self.assets_dir = self.data_dir / "npc_assets"
+        self.font_dir = self.data_dir / "fonts"
         self.render_dir = self.data_dir / "rendered"
         self.db_path = self.data_dir / "players.json"
+        self.characters_path = self.data_dir / "characters.json"
         self.db: Dict[str, Any] = {"scopes": {}}
+        self.characters: List[Dict[str, Any]] = []
+        self._font_cache: Dict[Tuple[int, bool], ImageFont.FreeTypeFont] = {}
+        self._warned_missing_font = False
+        self._register_page_apis(context)
 
     async def initialize(self):
         self.data_dir.mkdir(exist_ok=True)
         self.assets_dir.mkdir(exist_ok=True)
+        self.font_dir.mkdir(exist_ok=True)
         self.render_dir.mkdir(exist_ok=True)
         self._load_db()
+        self._load_characters()
+        self._ensure_fonts()
         self._ensure_assets()
         logger.info("剧本杀 NPC 数据库插件已加载。")
 
     async def terminate(self):
         self._save_db()
+        self._save_characters()
 
     @filter.command("剧本杀帮助", alias={"npc帮助", "NPC帮助"})
     async def help_cmd(self, event: AstrMessageEvent):
@@ -184,13 +290,14 @@ class JubenNpcPlugin(Star):
                 "/打卡 - 每天领取 1-3 星币或免费入场券",
                 "/星币 - 查看自己的星币与入场券",
                 "/赠送星币 @群友 数量 - 转赠星币",
+                "/赠送角色 @群友 角色名 - 赠送 NPC 或皮肤",
                 "/状态栏 - 查看当前 NPC 状态",
-                "/切换角色 NPC名 - 更换当前 NPC",
+                "/切换角色 角色名 - 更换当前 NPC 或皮肤",
                 "/抽奖 [次数] - 10 星币一次，入场券可抵一次",
-                "/物品栏 - 九宫格查看已拥有 NPC",
-                "/NPC信息 NPC名 - 查询获取途径、加成与技能",
+                "/物品栏 - 长条列表查看 NPC 与皮肤",
+                "/NPC信息 角色名 - 查询获取途径、加成与技能",
             ],
-            subtitle="所有主要信息均以图片展示。角色立绘可替换 data/npc_assets 下的同名 PNG。",
+            subtitle="后台 Plugin Page 可新增角色、上传图片、修改信息并赠送给指定玩家。",
         )
         yield event.image_result(str(path))
 
@@ -202,7 +309,7 @@ class JubenNpcPlugin(Star):
             [
                 f"持有星币：{player['coins']}",
                 f"免费入场券：{player['tickets']}",
-                f"当前角色：{self._npc(player['current_npc'])['name']}",
+                f"当前角色：{self._character(player['current_npc'])['name']}",
             ],
             subtitle="星币可用于抽奖，10 星币一次；免费入场券可抵扣一次单抽。",
         )
@@ -230,6 +337,29 @@ class JubenNpcPlugin(Star):
             "赠送成功",
             [f"你赠送给 {target_label} {amount} 个星币。", f"你的余额：{sender['coins']}", f"对方余额：{target['coins']}"],
             subtitle="星币在本群剧本杀档案内流通。",
+        )
+        yield event.image_result(str(path))
+
+    @filter.command("赠送角色", alias={"赠送NPC", "赠送皮肤", "给角色"})
+    async def grant_character_cmd(self, event: AstrMessageEvent):
+        target_id, target_label = self._parse_target_user(event)
+        character_name = self._parse_character_after_target(event)
+        character = self._find_character(character_name)
+        if not target_id or not character:
+            path = self._render_text_card(
+                "赠送失败",
+                ["格式：/赠送角色 @群友 角色名", "例如：/赠送角色 @小明 蓝时咖啡"],
+                subtitle="也可以在插件后台页面选择已记录的玩家赠送。",
+            )
+            yield event.image_result(str(path))
+            return
+
+        target = self._get_player_by_id(event, target_id, target_label)
+        created = self._grant_character(target, character["id"])
+        self._save_db()
+        path = self._render_text_card(
+            "角色已赠送",
+            [f"对象：{target_label}", f"角色：{character['name']} / {character.get('skin', '默认')}", f"结果：{'新增拥有' if created else '已拥有，未重复添加'}"],
         )
         yield event.image_result(str(path))
 
@@ -264,37 +394,37 @@ class JubenNpcPlugin(Star):
     @filter.command("状态栏", alias={"角色状态", "我的角色"})
     async def status_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
-        npc_name = self._arg_text(event)
-        npc = NPC_BY_NAME.get(npc_name) if npc_name else self._npc(player["current_npc"])
-        if not npc:
-            path = self._render_text_card("没有找到 NPC", [f"输入：{npc_name}", "可用 /物品栏 或 /NPC信息 查看角色。"])
+        character_name = self._arg_text(event)
+        character = self._find_character(character_name) if character_name else self._character(player["current_npc"])
+        if not character:
+            path = self._render_text_card("没有找到角色", [f"输入：{character_name}", "可用 /物品栏 或 /NPC信息 查看角色。"])
             yield event.image_result(str(path))
             return
-        if npc["id"] not in player["npcs"]:
-            path = self._render_text_card("尚未拥有", [f"{npc['name']} 还没有加入你的队伍。", "可通过抽奖或活动获取。"])
+        if character["id"] not in player["npcs"]:
+            path = self._render_text_card("尚未拥有", [f"{character['name']} 还没有加入你的队伍。", "可通过抽奖、活动或后台赠送获取。"])
             yield event.image_result(str(path))
             return
 
-        path = self._render_status(player, npc)
+        path = self._render_status(player, character)
         yield event.image_result(str(path))
 
     @filter.command("切换角色", alias={"更换角色", "选择角色"})
     async def switch_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
-        npc_name = self._arg_text(event)
-        npc = NPC_BY_NAME.get(npc_name)
-        if not npc:
-            path = self._render_text_card("切换失败", [f"没有找到 NPC：{npc_name or '空'}", "格式：/切换角色 星见凛"])
+        character_name = self._arg_text(event)
+        character = self._find_character(character_name)
+        if not character:
+            path = self._render_text_card("切换失败", [f"没有找到角色：{character_name or '空'}", "格式：/切换角色 蓝时咖啡"])
             yield event.image_result(str(path))
             return
-        if npc["id"] not in player["npcs"]:
-            path = self._render_text_card("切换失败", [f"你尚未拥有 {npc['name']}。", "可通过抽奖或活动获取。"])
+        if character["id"] not in player["npcs"]:
+            path = self._render_text_card("切换失败", [f"你尚未拥有 {character['name']}。", "可通过抽奖、活动或后台赠送获取。"])
             yield event.image_result(str(path))
             return
 
-        player["current_npc"] = npc["id"]
+        player["current_npc"] = character["id"]
         self._save_db()
-        path = self._render_status(player, npc, banner="已切换当前角色")
+        path = self._render_status(player, character, banner="已切换当前角色")
         yield event.image_result(str(path))
 
     @filter.command("抽奖", alias={"npc抽奖", "NPC抽奖"})
@@ -330,17 +460,94 @@ class JubenNpcPlugin(Star):
         path = self._render_inventory(player)
         yield event.image_result(str(path))
 
-    @filter.command("NPC信息", alias={"npc信息", "查NPC", "查询NPC"})
+    @filter.command("NPC信息", alias={"npc信息", "查NPC", "查询NPC", "角色信息"})
     async def npc_info_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
-        npc_name = self._arg_text(event)
-        npc = NPC_BY_NAME.get(npc_name)
-        if not npc:
-            path = self._render_text_card("NPC 查询", [f"没有找到：{npc_name or '空'}", "可查询：" + "、".join(npc["name"] for npc in NPCS)])
+        character_name = self._arg_text(event)
+        character = self._find_character(character_name)
+        if not character:
+            names = "、".join(character["name"] for character in self.characters[:18])
+            path = self._render_text_card("角色查询", [f"没有找到：{character_name or '空'}", "可查询：" + names])
             yield event.image_result(str(path))
             return
-        path = self._render_npc_info(player, npc)
+        path = self._render_npc_info(player, character)
         yield event.image_result(str(path))
+
+    def _register_page_apis(self, context: Context):
+        if not hasattr(context, "register_web_api") or request is None:
+            return
+
+        async def list_characters():
+            return json_response(
+                {
+                    "characters": self.characters,
+                    "players": self._known_players(),
+                }
+            )
+
+        async def save_character():
+            data = await request.json()
+            data = data or {}
+            character = self._normalize_character(data)
+            exists = False
+            for index, item in enumerate(self.characters):
+                if item["id"] == character["id"]:
+                    self.characters[index] = character
+                    exists = True
+                    break
+            if not exists:
+                self.characters.append(character)
+            self._save_characters()
+            self._ensure_assets()
+            return json_response({"ok": True, "character": character})
+
+        async def delete_character(character_id: str):
+            if character_id == "rin":
+                return error_response("默认初始角色不能删除。", 400)
+            before = len(self.characters)
+            self.characters = [item for item in self.characters if item["id"] != character_id]
+            self._save_characters()
+            return json_response({"ok": True, "deleted": before != len(self.characters)})
+
+        async def upload_image():
+            files = await request.files()
+            file = None
+            if hasattr(files, "get"):
+                file = files.get("file")
+            elif isinstance(files, list):
+                file = files[0] if files else None
+            if file is None:
+                return error_response("没有收到图片文件。", 400)
+            saved_name = await self._save_uploaded_image(file)
+            return json_response({"ok": True, "image": saved_name, "url": f"assets/{saved_name}"})
+
+        async def grant_character():
+            data = await request.json()
+            data = data or {}
+            scope_id = str(data.get("scope_id", "")).strip()
+            user_id = str(data.get("user_id", "")).strip()
+            character_id = str(data.get("character_id", "")).strip()
+            name = str(data.get("name", user_id)).strip() or user_id
+            if not scope_id or not user_id or not self._character_or_none(character_id):
+                return error_response("scope_id、user_id 或 character_id 无效。", 400)
+            player = self._get_player_by_scope(scope_id, user_id, name)
+            created = self._grant_character(player, character_id)
+            self._save_db()
+            return json_response({"ok": True, "created": created, "player": player})
+
+        async def get_asset(filename: str):
+            safe_name = Path(filename).name
+            path = self.assets_dir / safe_name
+            if not path.exists():
+                return error_response("图片不存在。", 404)
+            return file_response(str(path))
+
+        context.register_web_api(f"/{PLUGIN_NAME}/characters", list_characters, ["GET"], "List NPC characters")
+        context.register_web_api(f"/{PLUGIN_NAME}/characters", save_character, ["POST"], "Save NPC character")
+        context.register_web_api(f"/{PLUGIN_NAME}/characters/<character_id>", delete_character, ["DELETE"], "Delete NPC character")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-image", upload_image, ["POST"], "Upload NPC image")
+        context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
+        context.register_web_api(f"/{PLUGIN_NAME}/assets/<filename>", get_asset, ["GET"], "Get NPC image")
 
     def _load_db(self):
         if not self.db_path.exists():
@@ -355,6 +562,80 @@ class JubenNpcPlugin(Star):
     def _save_db(self):
         self.data_dir.mkdir(exist_ok=True)
         self.db_path.write_text(json.dumps(self.db, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _load_characters(self):
+        if not self.characters_path.exists():
+            self.characters = [self._normalize_character(item) for item in DEFAULT_CHARACTERS]
+            self._save_characters()
+            return
+        try:
+            loaded = json.loads(self.characters_path.read_text(encoding="utf-8"))
+            characters = loaded.get("characters", loaded) if isinstance(loaded, dict) else loaded
+            self.characters = [self._normalize_character(item) for item in characters]
+        except Exception as exc:
+            logger.error(f"读取角色配置失败，将使用默认角色：{exc}")
+            self.characters = [self._normalize_character(item) for item in DEFAULT_CHARACTERS]
+
+        known_ids = {item["id"] for item in self.characters}
+        for item in DEFAULT_CHARACTERS:
+            if item["id"] not in known_ids:
+                self.characters.append(self._normalize_character(item))
+        self._save_characters()
+
+    def _save_characters(self):
+        self.data_dir.mkdir(exist_ok=True)
+        payload = {"characters": self.characters}
+        self.characters_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _normalize_character(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        name = str(data.get("name") or data.get("id") or "未命名角色").strip()
+        character_id = self._slug(str(data.get("id") or name))
+        skills = data.get("skills") or [["未命名技能", "待填写。"], ["未命名技能", "待填写。"], ["未命名技能", "待填写。"]]
+        normalized_skills = []
+        for item in skills[:3]:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                normalized_skills.append([str(item[0]), str(item[1])])
+            elif isinstance(item, dict):
+                normalized_skills.append([str(item.get("name", "未命名技能")), str(item.get("desc", "待填写。"))])
+            else:
+                normalized_skills.append(["未命名技能", str(item)])
+        while len(normalized_skills) < 3:
+            normalized_skills.append(["未命名技能", "待填写。"])
+
+        colors = data.get("colors") or ["#6c8cff", "#f4d35e", "#10172a"]
+        if not isinstance(colors, list) or len(colors) < 3:
+            colors = ["#6c8cff", "#f4d35e", "#10172a"]
+
+        image = str(data.get("image") or f"{character_id}.png").strip()
+        return {
+            "id": character_id,
+            "name": name,
+            "base": str(data.get("base") or name).strip(),
+            "skin": str(data.get("skin") or "默认").strip(),
+            "star": str(data.get("star") or "R").strip().upper(),
+            "route": str(data.get("route") or "运营后台添加").strip(),
+            "bonus": str(data.get("bonus") or "通用经验 +5%").strip(),
+            "intro": str(data.get("intro") or "这个角色还没有介绍。").strip(),
+            "skills": normalized_skills,
+            "colors": [str(colors[0]), str(colors[1]), str(colors[2])],
+            "image": Path(image).name,
+            "featured": bool(data.get("featured", False)),
+        }
+
+    def _known_players(self) -> List[Dict[str, Any]]:
+        players: List[Dict[str, Any]] = []
+        for scope_id, scope in self.db.get("scopes", {}).items():
+            for user_id, player in scope.get("players", {}).items():
+                players.append(
+                    {
+                        "scope_id": scope_id,
+                        "user_id": user_id,
+                        "name": player.get("name") or user_id,
+                        "current_npc": player.get("current_npc"),
+                        "owned_count": len(player.get("npcs", {})),
+                    }
+                )
+        return players
 
     def _scope_id(self, event: AstrMessageEvent) -> str:
         for name in ("get_group_id", "get_session_id"):
@@ -381,46 +662,104 @@ class JubenNpcPlugin(Star):
         return event.get_sender_name()
 
     def _scope(self, event: AstrMessageEvent) -> Dict[str, Any]:
-        scope_id = self._scope_id(event)
+        return self._db_scope(self._scope_id(event))
+
+    def _db_scope(self, scope_id: str) -> Dict[str, Any]:
         scopes = self.db.setdefault("scopes", {})
-        return scopes.setdefault(scope_id, {"players": {}})
+        return scopes.setdefault(str(scope_id), {"players": {}})
 
     def _new_player(self, user_id: str, name: str) -> Dict[str, Any]:
+        starter = "rin" if self._character_or_none("rin") else self.characters[0]["id"]
         return {
             "user_id": user_id,
             "name": name,
             "coins": 20,
             "tickets": 0,
             "last_checkin": "",
-            "current_npc": "rin",
-            "npcs": {"rin": {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}},
+            "current_npc": starter,
+            "npcs": {starter: {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}},
         }
 
     def _get_player(self, event: AstrMessageEvent) -> Dict[str, Any]:
         return self._get_player_by_id(event, self._sender_id(event), event.get_sender_name())
 
     def _get_player_by_id(self, event: AstrMessageEvent, user_id: str, name: str) -> Dict[str, Any]:
-        players = self._scope(event).setdefault("players", {})
-        player = players.setdefault(user_id, self._new_player(user_id, name))
-        player["name"] = name or player.get("name") or user_id
+        return self._get_player_by_scope(self._scope_id(event), user_id, name)
+
+    def _get_player_by_scope(self, scope_id: str, user_id: str, name: str) -> Dict[str, Any]:
+        players = self._db_scope(scope_id).setdefault("players", {})
+        player = players.setdefault(str(user_id), self._new_player(str(user_id), name))
+        player["name"] = name or player.get("name") or str(user_id)
         player.setdefault("coins", 0)
         player.setdefault("tickets", 0)
-        player.setdefault("current_npc", "rin")
         player.setdefault("npcs", {})
+        self._migrate_player_npcs(player)
         if not player["npcs"]:
-            player["npcs"]["rin"] = {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}
+            starter = "rin" if self._character_or_none("rin") else self.characters[0]["id"]
+            player["npcs"][starter] = {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}
+        player.setdefault("current_npc", next(iter(player["npcs"])))
+        if player["current_npc"] not in player["npcs"]:
+            player["current_npc"] = next(iter(player["npcs"]))
         return player
 
-    def _npc(self, npc_id: str) -> Dict[str, Any]:
-        return NPC_BY_ID.get(npc_id, NPCS[0])
+    def _migrate_player_npcs(self, player: Dict[str, Any]):
+        npcs = player.setdefault("npcs", {})
+        for character_id, value in list(npcs.items()):
+            if isinstance(value, int):
+                npcs[character_id] = {"exp": value, "owned_at": ""}
+            elif isinstance(value, dict):
+                value.setdefault("exp", 0)
+                value.setdefault("owned_at", "")
+            else:
+                npcs[character_id] = {"exp": 0, "owned_at": ""}
+        for character_id in list(npcs.keys()):
+            if not self._character_or_none(character_id):
+                logger.info(f"玩家拥有未知角色 {character_id}，暂时保留数据。")
 
-    def _npc_exp(self, player: Dict[str, Any], npc_id: str) -> int:
-        return int(player["npcs"].get(npc_id, {}).get("exp", 0))
+    def _character(self, character_id: str) -> Dict[str, Any]:
+        return self._character_or_none(character_id) or self.characters[0]
 
-    def _add_exp(self, player: Dict[str, Any], npc_id: str, exp: int):
-        if npc_id not in player["npcs"]:
-            player["npcs"][npc_id] = {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}
-        player["npcs"][npc_id]["exp"] = int(player["npcs"][npc_id].get("exp", 0)) + exp
+    def _character_or_none(self, character_id: str) -> Optional[Dict[str, Any]]:
+        for character in self.characters:
+            if character["id"] == character_id:
+                return character
+        return None
+
+    def _find_character(self, value: str) -> Optional[Dict[str, Any]]:
+        value = (value or "").strip()
+        if not value:
+            return None
+        if self._character_or_none(value):
+            return self._character_or_none(value)
+        lowered = value.lower()
+        for character in self.characters:
+            names = [
+                character["name"],
+                character.get("base", ""),
+                character.get("skin", ""),
+                f"{character.get('base', '')} {character.get('skin', '')}",
+                f"{character.get('name', '')} {character.get('skin', '')}",
+            ]
+            if any(lowered == str(name).strip().lower() for name in names if name):
+                return character
+        for character in self.characters:
+            if lowered in character["name"].lower() or lowered in character.get("skin", "").lower():
+                return character
+        return None
+
+    def _grant_character(self, player: Dict[str, Any], character_id: str) -> bool:
+        if character_id in player["npcs"]:
+            return False
+        player["npcs"][character_id] = {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}
+        return True
+
+    def _npc_exp(self, player: Dict[str, Any], character_id: str) -> int:
+        return int(player["npcs"].get(character_id, {}).get("exp", 0))
+
+    def _add_exp(self, player: Dict[str, Any], character_id: str, exp: int):
+        if character_id not in player["npcs"]:
+            self._grant_character(player, character_id)
+        player["npcs"][character_id]["exp"] = int(player["npcs"][character_id].get("exp", 0)) + exp
 
     def _level_info(self, exp: int) -> Tuple[int, int, int, float]:
         spent = 0
@@ -446,18 +785,32 @@ class JubenNpcPlugin(Star):
         text = event.message_str
         amount_matches = re.findall(r"\d+", text)
         amount = int(amount_matches[-1]) if amount_matches else 0
-        target_id = self._extract_at_id(event)
-        target_label = target_id or ""
-
+        target_id, target_label = self._parse_target_user(event)
         if not target_id:
             arg = self._arg_text(event)
             tokens = arg.split()
             if len(tokens) >= 2:
                 target_id = tokens[0].strip("@")
                 target_label = target_id
-        else:
-            target_label = f"用户{target_id}"
         return target_id, target_label, amount
+
+    def _parse_target_user(self, event: AstrMessageEvent) -> Tuple[Optional[str], str]:
+        target_id = self._extract_at_id(event)
+        if target_id:
+            return target_id, f"用户{target_id}"
+        arg = self._arg_text(event)
+        tokens = arg.split()
+        if tokens:
+            user_id = tokens[0].strip("@")
+            return user_id, user_id
+        return None, ""
+
+    def _parse_character_after_target(self, event: AstrMessageEvent) -> str:
+        arg = self._arg_text(event)
+        tokens = arg.split(maxsplit=1)
+        if len(tokens) == 2:
+            return tokens[1].strip()
+        return ""
 
     def _extract_at_id(self, event: AstrMessageEvent) -> Optional[str]:
         try:
@@ -486,21 +839,21 @@ class JubenNpcPlugin(Star):
     def _monthly_pool(self) -> List[Dict[str, Any]]:
         seed = datetime.now().strftime("%Y-%m")
         rng = random.Random(seed)
-        featured = [npc for npc in NPCS if npc["star"] in {"SSR", "SR"}]
-        return rng.sample(featured, k=min(3, len(featured)))
+        featured = [item for item in self.characters if item.get("featured") or item["star"] in {"SSR", "SR"}]
+        return rng.sample(featured, k=min(3, len(featured))) if featured else self.characters[:3]
 
     def _roll_draw(self, player: Dict[str, Any]) -> Dict[str, Any]:
         roll = random.random()
-        current_id = player.get("current_npc", "rin")
+        current_id = player.get("current_npc", self.characters[0]["id"])
         if roll < 0.06:
-            npc = random.choice(self._monthly_pool())
-            already_owned = npc["id"] in player["npcs"]
+            character = random.choice(self._monthly_pool())
+            already_owned = character["id"] in player["npcs"]
             if already_owned:
                 exp = 600
-                self._add_exp(player, npc["id"], exp)
-                return {"kind": "大奖重复转经验", "name": npc["name"], "exp": exp, "npc_id": npc["id"]}
-            player["npcs"][npc["id"]] = {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}
-            return {"kind": "大奖角色", "name": npc["name"], "exp": 0, "npc_id": npc["id"]}
+                self._add_exp(player, character["id"], exp)
+                return {"kind": "大奖重复转经验", "name": character["name"], "exp": exp, "character_id": character["id"]}
+            self._grant_character(player, character["id"])
+            return {"kind": "大奖角色", "name": character["name"], "exp": 0, "character_id": character["id"]}
 
         gift_table = [
             ("线索书签", 80),
@@ -511,18 +864,106 @@ class JubenNpcPlugin(Star):
         ]
         gift, exp = random.choices(gift_table, weights=[35, 30, 20, 10, 5], k=1)[0]
         self._add_exp(player, current_id, exp)
-        return {"kind": "礼物", "name": gift, "exp": exp, "npc_id": current_id}
+        return {"kind": "礼物", "name": gift, "exp": exp, "character_id": current_id}
+
+    def _slug(self, value: str) -> str:
+        value = value.strip().lower()
+        value = re.sub(r"\s+", "_", value)
+        value = re.sub(r"[^a-z0-9_\-\u4e00-\u9fff]", "", value)
+        return value or f"character_{int(datetime.now().timestamp())}"
+
+    async def _save_uploaded_image(self, upload: Any) -> str:
+        raw_name = Path(getattr(upload, "filename", "") or "character.png").name
+        suffix = Path(raw_name).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            suffix = ".png"
+        saved_name = f"custom_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}{suffix}"
+        dest = self.assets_dir / saved_name
+        if hasattr(upload, "save"):
+            result = upload.save(str(dest))
+            if inspect.isawaitable(result):
+                await result
+        else:
+            source_path = getattr(upload, "path", None)
+            if source_path:
+                shutil.copyfile(str(source_path), dest)
+            else:
+                raise RuntimeError("当前 AstrBot 上传对象不支持保存。")
+        Image.open(dest).verify()
+        return saved_name
+
+    def _ensure_fonts(self):
+        if self._find_font_file(False) and self._find_font_file(True):
+            return
+
+        self.font_dir.mkdir(exist_ok=True)
+        for filename, url in DOWNLOADABLE_FONTS:
+            path = self.font_dir / filename
+            if path.exists() and path.stat().st_size > 8 * 1024 * 1024:
+                continue
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            try:
+                logger.info(f"正在下载中文字体：{filename}")
+                tmp_path.unlink(missing_ok=True)
+                urllib.request.urlretrieve(url, tmp_path)
+                if tmp_path.stat().st_size <= 8 * 1024 * 1024:
+                    raise RuntimeError("字体文件下载不完整")
+                tmp_path.replace(path)
+            except Exception as exc:
+                tmp_path.unlink(missing_ok=True)
+                if path.exists() and path.stat().st_size <= 8 * 1024 * 1024:
+                    path.unlink(missing_ok=True)
+                logger.error(f"下载中文字体失败：{filename}，原因：{exc}")
+
+    def _find_font_file(self, bold: bool = False) -> Optional[Path]:
+        local_bold = [self.font_dir / "NotoSansCJKsc-Bold.otf", self.font_dir / "SourceHanSansSC-Bold.otf"]
+        local_regular = [self.font_dir / "NotoSansCJKsc-Regular.otf", self.font_dir / "SourceHanSansSC-Regular.otf"]
+        system_bold = [
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc"),
+            Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+            Path("C:/Windows/Fonts/msyhbd.ttc"),
+            Path("C:/Windows/Fonts/simhei.ttf"),
+        ]
+        system_regular = [
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+            Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+            Path("C:/Windows/Fonts/msyh.ttc"),
+            Path("C:/Windows/Fonts/simhei.ttf"),
+            Path("C:/Windows/Fonts/simsun.ttc"),
+        ]
+
+        candidates = (local_bold + system_bold if bold else local_regular + system_regular)
+        if bold:
+            candidates += local_regular + system_regular
+
+        for font_path in candidates:
+            if not font_path.exists():
+                continue
+            min_size = 8 * 1024 * 1024 if self.font_dir in font_path.parents else 1024
+            if font_path.stat().st_size > min_size:
+                return font_path
+        return None
 
     def _font(self, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-        candidates = [
-            "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
-            "C:/Windows/Fonts/simhei.ttf",
-            "C:/Windows/Fonts/simsun.ttc",
-        ]
-        for font_path in candidates:
-            if Path(font_path).exists():
-                return ImageFont.truetype(font_path, size)
-        return ImageFont.load_default()
+        cache_key = (size, bold)
+        if cache_key in self._font_cache:
+            return self._font_cache[cache_key]
+
+        font_path = self._find_font_file(bold)
+        if font_path:
+            font = ImageFont.truetype(str(font_path), size)
+            self._font_cache[cache_key] = font
+            return font
+
+        if not self._warned_missing_font:
+            logger.error("未找到中文字体，图片文字可能显示为方块。请将 NotoSansCJKsc-Regular.otf 放入 data/fonts。")
+            self._warned_missing_font = True
+        font = ImageFont.load_default()
+        self._font_cache[cache_key] = font
+        return font
 
     def _wrap(self, draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, width: int) -> List[str]:
         lines: List[str] = []
@@ -551,59 +992,40 @@ class JubenNpcPlugin(Star):
         return img
 
     def _ensure_assets(self):
-        for npc in NPCS:
-            path = self.assets_dir / f"{npc['id']}.png"
+        for character in self.characters:
+            path = self.assets_dir / character["image"]
             if path.exists():
                 continue
-            self._draw_placeholder_portrait(npc, path)
+            self._draw_placeholder_portrait(character, path)
 
-    def _draw_placeholder_portrait(self, npc: Dict[str, Any], path: Path):
-        main, accent, dark = npc["colors"]
-        img = self._gradient((600, 820), dark, main).convert("RGBA")
+    def _draw_placeholder_portrait(self, character: Dict[str, Any], path: Path):
+        main, accent, dark = character["colors"]
+        img = self._gradient((960, 540), dark, main).convert("RGBA")
         draw = ImageDraw.Draw(img)
-        rng = random.Random(npc["id"])
-        for _ in range(70):
-            x = rng.randint(0, 600)
-            y = rng.randint(0, 820)
+        rng = random.Random(character["id"])
+        for _ in range(80):
+            x = rng.randint(0, 960)
+            y = rng.randint(0, 540)
             r = rng.randint(1, 3)
-            draw.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255, rng.randint(50, 150)))
-
-        cx = 300
-        draw.ellipse((130, 550, 470, 980), fill=Image.new("RGB", (1, 1), main).getpixel((0, 0)) + (230,))
-        skin = (255, 224, 205, 255)
-        hair = Image.new("RGB", (1, 1), accent).getpixel((0, 0)) + (255,)
-        draw.ellipse((170, 145, 430, 430), fill=hair)
-        draw.polygon([(180, 250), (125, 565), (245, 405)], fill=hair)
-        draw.polygon([(420, 250), (485, 565), (355, 405)], fill=hair)
-        draw.ellipse((190, 190, 410, 455), fill=skin)
-        draw.pieslice((170, 135, 430, 370), 180, 360, fill=hair)
-        for i in range(8):
-            x = 170 + i * 35
-            draw.polygon([(x, 170), (x + 45, 165), (x + 20, 290)], fill=hair)
-        eye_color = Image.new("RGB", (1, 1), main).getpixel((0, 0)) + (255,)
-        draw.ellipse((225, 300, 270, 333), fill=(255, 255, 255, 255))
-        draw.ellipse((330, 300, 375, 333), fill=(255, 255, 255, 255))
-        draw.ellipse((240, 302, 265, 332), fill=eye_color)
-        draw.ellipse((345, 302, 370, 332), fill=eye_color)
-        draw.ellipse((248, 306, 256, 314), fill=(255, 255, 255, 255))
-        draw.ellipse((353, 306, 361, 314), fill=(255, 255, 255, 255))
-        draw.arc((270, 346, 330, 382), 20, 160, fill=(170, 90, 100, 255), width=4)
-        draw.rectangle((245, 475, 355, 575), fill=skin)
-        draw.polygon([(175, 820), (250, 520), (350, 520), (425, 820)], fill=(245, 245, 255, 235))
-        draw.line((250, 520, 300, 650, 350, 520), fill=Image.new("RGB", (1, 1), main).getpixel((0, 0)) + (255,), width=8)
-        draw.text((42, 42), npc["name"], font=self._font(48, True), fill=(255, 255, 255, 245))
-        draw.text((44, 102), npc["star"], font=self._font(30, True), fill=Image.new("RGB", (1, 1), accent).getpixel((0, 0)) + (255,))
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255, rng.randint(40, 145)))
+        draw.rounded_rectangle((70, 70, 890, 470), radius=28, fill=(255, 255, 255, 42), outline=(255, 255, 255, 150), width=3)
+        draw.text((110, 145), character["name"], font=self._font(62, True), fill=(255, 255, 255, 245))
+        draw.text((112, 220), character.get("skin", "默认"), font=self._font(34, True), fill=Image.new("RGB", (1, 1), accent).getpixel((0, 0)) + (255,))
+        draw.text((112, 285), "请在插件后台上传角色图片", font=self._font(28), fill=(255, 255, 255, 215))
+        draw.text((112, 335), character["star"], font=self._font(38, True), fill=(255, 240, 170, 255))
+        path.parent.mkdir(parents=True, exist_ok=True)
         img.save(path)
 
-    def _portrait(self, npc: Dict[str, Any], size: Tuple[int, int]) -> Image.Image:
-        path = self.assets_dir / f"{npc['id']}.png"
+    def _portrait(self, character: Dict[str, Any], size: Tuple[int, int]) -> Image.Image:
+        path = self.assets_dir / character["image"]
         if not path.exists():
-            self._draw_placeholder_portrait(npc, path)
+            self._draw_placeholder_portrait(character, path)
         img = Image.open(path).convert("RGBA")
-        img.thumbnail(size, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGBA", size, (0, 0, 0, 0))
-        canvas.alpha_composite(img, ((size[0] - img.width) // 2, (size[1] - img.height) // 2))
-        return canvas
+        scale = max(size[0] / img.width, size[1] / img.height)
+        resized = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
+        left = max(0, (resized.width - size[0]) // 2)
+        top = max(0, (resized.height - size[1]) // 2)
+        return resized.crop((left, top, left + size[0], top + size[1]))
 
     def _render_text_card(self, title: str, lines: List[str], subtitle: str = "") -> Path:
         path = self.render_dir / f"text_{datetime.now().timestamp()}.png"
@@ -625,105 +1047,106 @@ class JubenNpcPlugin(Star):
         img.save(path)
         return path
 
-    def _render_status(self, player: Dict[str, Any], npc: Dict[str, Any], banner: str = "") -> Path:
-        path = self.render_dir / f"status_{player['user_id']}_{npc['id']}.png"
-        main, accent, dark = npc["colors"]
+    def _render_status(self, player: Dict[str, Any], character: Dict[str, Any], banner: str = "") -> Path:
+        path = self.render_dir / f"status_{player['user_id']}_{character['id']}.png"
+        main, _, dark = character["colors"]
         img = self._gradient((1280, 760), dark, "#f4f7fb").convert("RGBA")
         draw = ImageDraw.Draw(img)
-        img.alpha_composite(self._portrait(npc, (470, 650)), (65, 70))
-        draw.rounded_rectangle((520, 70, 1215, 725), radius=24, fill=(255, 255, 255, 235))
+        img.alpha_composite(self._portrait(character, (520, 650)), (55, 70))
+        draw.rounded_rectangle((530, 70, 1215, 725), radius=24, fill=(255, 255, 255, 235))
 
         if banner:
-            draw.rounded_rectangle((555, 95, 820, 142), radius=18, fill=main)
-            draw.text((578, 103), banner, font=self._font(24, True), fill="white")
+            draw.rounded_rectangle((565, 95, 845, 142), radius=18, fill=main)
+            draw.text((588, 103), banner, font=self._font(24, True), fill="white")
 
-        exp = self._npc_exp(player, npc["id"])
+        exp = self._npc_exp(player, character["id"])
         level, current, need, ratio = self._level_info(exp)
-        draw.text((555, 160), npc["name"], font=self._font(58, True), fill="#172033")
-        draw.text((555, 230), f"{npc['star']}  |  {npc['bonus']}", font=self._font(28, True), fill=main)
+        display_name = character["name"]
+        skin = character.get("skin", "默认")
+        draw.text((565, 160), display_name, font=self._font(54, True), fill="#172033")
+        draw.text((565, 222), f"{skin}  |  {character['star']}  |  {character['bonus']}", font=self._font(25, True), fill=main)
         stars = "★" * level + "☆" * (5 - level)
-        draw.text((555, 280), stars, font=self._font(42, True), fill="#f5b642")
-        draw.text((555, 340), f"Lv.{level}  {current}/{need} EXP", font=self._font(26, True), fill="#26364d")
-        draw.rounded_rectangle((555, 382, 1145, 418), radius=18, fill="#dbe2ef")
-        draw.rounded_rectangle((555, 382, 555 + int(590 * ratio), 418), radius=18, fill=main)
+        draw.text((565, 272), stars, font=self._font(40, True), fill="#f5b642")
+        draw.text((565, 328), f"Lv.{level}  {current}/{need} EXP", font=self._font(26, True), fill="#26364d")
+        draw.rounded_rectangle((565, 370, 1148, 406), radius=18, fill="#dbe2ef")
+        draw.rounded_rectangle((565, 370, 565 + int(583 * ratio), 406), radius=18, fill=main)
 
-        y = 455
-        for line in self._wrap(draw, npc["intro"], self._font(25), 580)[:3]:
-            draw.text((555, y), line, font=self._font(25), fill="#344056")
-            y += 36
+        y = 445
+        for line in self._wrap(draw, character["intro"], self._font(24), 570)[:3]:
+            draw.text((565, y), line, font=self._font(24), fill="#344056")
+            y += 34
 
         y = 535
-        thresholds = [2, 3, 5]
-        for threshold, (skill, desc) in zip(thresholds, npc["skills"]):
+        for threshold, (skill, desc) in zip([2, 3, 5], character["skills"]):
             unlocked = level >= threshold
             fill = "#172033" if unlocked else "#8a94a6"
             chip = main if unlocked else "#cfd6e4"
-            draw.rounded_rectangle((555, y, 1145, y + 36), radius=14, fill=chip)
-            draw.text((575, y + 5), f"{threshold}星 {skill}", font=self._font(20, True), fill="white" if unlocked else "#566071")
-            draw.text((575, y + 41), desc, font=self._font(18), fill=fill)
+            draw.rounded_rectangle((565, y, 1148, y + 36), radius=14, fill=chip)
+            draw.text((585, y + 5), f"{threshold}星 {skill}", font=self._font(20, True), fill="white" if unlocked else "#566071")
+            draw.text((585, y + 41), desc, font=self._font(18), fill=fill)
             y += 64
         img.save(path)
         return path
 
     def _render_inventory(self, player: Dict[str, Any]) -> Path:
+        row_h = 172
+        height = max(760, 170 + len(self.characters) * row_h + 55)
         path = self.render_dir / f"inventory_{player['user_id']}.png"
-        img = self._gradient((1120, 1120), "#173044", "#f2f6f9").convert("RGBA")
+        img = self._gradient((1180, height), "#173044", "#f2f6f9").convert("RGBA")
         draw = ImageDraw.Draw(img)
-        draw.text((60, 45), "NPC 物品栏", font=self._font(54, True), fill="white")
-        draw.text((60, 105), f"当前角色：{self._npc(player['current_npc'])['name']}", font=self._font(26), fill="#dbe7f0")
+        draw.text((60, 42), "NPC / 皮肤物品栏", font=self._font(52, True), fill="white")
+        draw.text((60, 105), f"当前角色：{self._character(player['current_npc'])['name']}    已拥有：{len(player['npcs'])}/{len(self.characters)}", font=self._font(25), fill="#dbe7f0")
 
-        start_x, start_y = 70, 170
-        cell, gap = 300, 28
-        for idx, npc in enumerate(NPCS[:9]):
-            row, col = divmod(idx, 3)
-            x = start_x + col * (cell + gap)
-            y = start_y + row * (cell + gap)
-            owned = npc["id"] in player["npcs"]
-            draw.rounded_rectangle((x, y, x + cell, y + cell), radius=18, fill=(255, 255, 255, 238))
-            portrait = self._portrait(npc, (cell - 30, 210))
+        y = 165
+        for character in self.characters:
+            owned = character["id"] in player["npcs"]
+            main = character["colors"][0]
+            draw.rounded_rectangle((55, y, 1125, y + 138), radius=18, fill=(255, 255, 255, 238))
+            portrait = self._portrait(character, (220, 124))
             if not owned:
-                portrait = ImageEnhance.Color(portrait).enhance(0.05).filter(ImageFilter.GaussianBlur(0.5))
-            img.alpha_composite(portrait, (x + 15, y + 14))
-            draw.text((x + 20, y + 230), npc["name"], font=self._font(26, True), fill="#172033" if owned else "#798395")
-            exp = self._npc_exp(player, npc["id"]) if owned else 0
-            level = self._level_info(exp)[0] if owned else 0
-            draw.text((x + 20, y + 265), f"{'已拥有' if owned else '未获得'}  Lv.{level}", font=self._font(20), fill="#526071")
-            if npc["id"] == player.get("current_npc"):
-                draw.rounded_rectangle((x + 188, y + 258, x + 280, y + 288), radius=12, fill=npc["colors"][0])
-                draw.text((x + 203, y + 261), "当前", font=self._font(18, True), fill="white")
+                portrait = ImageEnhance.Color(portrait).enhance(0.08).filter(ImageFilter.GaussianBlur(0.5))
+            img.alpha_composite(portrait, (70, y + 7))
+            draw.text((315, y + 18), character["name"], font=self._font(31, True), fill="#172033" if owned else "#7b8496")
+            draw.text((315, y + 58), f"{character.get('skin', '默认')}  |  {character['star']}  |  {character['bonus']}", font=self._font(22), fill=main if owned else "#8b94a6")
+            exp = self._npc_exp(player, character["id"]) if owned else 0
+            level, current, need, ratio = self._level_info(exp) if owned else (0, 0, LEVEL_REQUIREMENTS[0], 0)
+            draw.rounded_rectangle((315, y + 96, 820, y + 118), radius=11, fill="#dbe2ef")
+            if owned:
+                draw.rounded_rectangle((315, y + 96, 315 + int(505 * ratio), y + 118), radius=11, fill=main)
+            draw.text((840, y + 91), f"{'已拥有' if owned else '未获得'}  Lv.{level}  {current}/{need}", font=self._font(20), fill="#526071")
+            if character["id"] == player.get("current_npc"):
+                draw.rounded_rectangle((1015, y + 18, 1095, y + 52), radius=12, fill=main)
+                draw.text((1033, y + 22), "当前", font=self._font(18, True), fill="white")
+            y += row_h
         img.save(path)
         return path
 
-    def _render_npc_info(self, player: Dict[str, Any], npc: Dict[str, Any]) -> Path:
-        owned = npc["id"] in player["npcs"]
-        path = self.render_dir / f"npc_{npc['id']}.png"
-        main, _, dark = npc["colors"]
+    def _render_npc_info(self, player: Dict[str, Any], character: Dict[str, Any]) -> Path:
+        owned = character["id"] in player["npcs"]
+        path = self.render_dir / f"npc_{character['id']}.png"
+        main, _, dark = character["colors"]
         img = self._gradient((1180, 760), dark, "#eef3f8").convert("RGBA")
         draw = ImageDraw.Draw(img)
-        img.alpha_composite(self._portrait(npc, (410, 650)), (55, 70))
-        draw.rounded_rectangle((470, 70, 1125, 690), radius=22, fill=(255, 255, 255, 235))
-        draw.text((510, 115), npc["name"], font=self._font(54, True), fill="#172033")
-        draw.text((510, 180), f"{npc['star']}  |  {'已拥有' if owned else '未拥有'}", font=self._font(28, True), fill=main)
-        blocks = [
-            ("获取途径", npc["route"]),
-            ("经验加成", npc["bonus"]),
-            ("角色介绍", npc["intro"]),
-        ]
-        y = 245
+        img.alpha_composite(self._portrait(character, (430, 650)), (45, 70))
+        draw.rounded_rectangle((480, 70, 1125, 690), radius=22, fill=(255, 255, 255, 235))
+        draw.text((520, 112), character["name"], font=self._font(50, True), fill="#172033")
+        draw.text((520, 174), f"{character.get('skin', '默认')}  |  {character['star']}  |  {'已拥有' if owned else '未拥有'}", font=self._font(25, True), fill=main)
+        blocks = [("获取途径", character["route"]), ("经验加成", character["bonus"]), ("角色介绍", character["intro"])]
+        y = 238
         for title, text in blocks:
-            draw.text((510, y), title, font=self._font(26, True), fill=main)
-            y += 38
-            for wrapped in self._wrap(draw, text, self._font(24), 555)[:3]:
-                draw.text((510, y), wrapped, font=self._font(24), fill="#344056")
-                y += 34
-            y += 15
-        draw.text((510, y), "技能", font=self._font(26, True), fill=main)
-        y += 40
-        for idx, (skill, desc) in enumerate(npc["skills"]):
-            draw.text((510, y), f"{[2, 3, 5][idx]}星 {skill}", font=self._font(22, True), fill="#172033")
-            y += 30
-            draw.text((510, y), desc, font=self._font(20), fill="#526071")
-            y += 38
+            draw.text((520, y), title, font=self._font(25, True), fill=main)
+            y += 36
+            for wrapped in self._wrap(draw, text, self._font(23), 555)[:3]:
+                draw.text((520, y), wrapped, font=self._font(23), fill="#344056")
+                y += 32
+            y += 12
+        draw.text((520, y), "技能", font=self._font(25, True), fill=main)
+        y += 38
+        for idx, (skill, desc) in enumerate(character["skills"]):
+            draw.text((520, y), f"{[2, 3, 5][idx]}星 {skill}", font=self._font(21, True), fill="#172033")
+            y += 29
+            draw.text((520, y), desc, font=self._font(19), fill="#526071")
+            y += 36
         img.save(path)
         return path
 
@@ -737,20 +1160,20 @@ class JubenNpcPlugin(Star):
         pool = self._monthly_pool()
         draw.rounded_rectangle((760, 55, 1120, 225), radius=20, fill=(255, 255, 255, 226))
         draw.text((790, 82), "本月大奖池", font=self._font(28, True), fill="#172033")
-        draw.text((790, 126), "、".join(npc["name"] for npc in pool), font=self._font(22), fill="#3e4a5e")
+        draw.text((790, 126), "、".join(item["name"] for item in pool), font=self._font(22), fill="#3e4a5e")
         draw.text((790, 164), "大奖概率 6%，重复转 600 EXP", font=self._font(20), fill="#657086")
 
         y = 190
         for index, result in enumerate(results, start=1):
-            npc = self._npc(result["npc_id"])
+            character = self._character(result["character_id"])
             x = 65 + ((index - 1) % 2) * 540
             yy = y + ((index - 1) // 2) * 100
             draw.rounded_rectangle((x, yy, x + 500, yy + 78), radius=18, fill=(255, 255, 255, 232))
-            color = npc["colors"][0]
+            color = character["colors"][0]
             draw.rounded_rectangle((x + 18, yy + 18, x + 92, yy + 60), radius=16, fill=color)
             draw.text((x + 38, yy + 24), str(index), font=self._font(24, True), fill="white")
             draw.text((x + 112, yy + 13), result["name"], font=self._font(25, True), fill="#172033")
-            detail = result["kind"] if result["exp"] == 0 else f"{result['kind']} -> {npc['name']} +{result['exp']} EXP"
+            detail = result["kind"] if result["exp"] == 0 else f"{result['kind']} -> {character['name']} +{result['exp']} EXP"
             draw.text((x + 112, yy + 45), detail, font=self._font(19), fill="#526071")
         img.save(path)
         return path
