@@ -31,6 +31,8 @@ except Exception:
 
 LEVEL_REQUIREMENTS = [1000, 2000, 3000, 4000, 5000]
 DRAW_COST = 10
+WINNING_NUMBER_MIN = 1
+WINNING_NUMBER_MAX = 100
 CHECKIN_REWARDS = [
     ("星币", 1, 45),
     ("星币", 2, 30),
@@ -294,6 +296,7 @@ class JubenNpcPlugin(Star):
                 "/状态栏 - 查看当前 NPC 状态",
                 "/切换角色 角色名 - 更换当前 NPC 或皮肤",
                 "/抽奖 [次数] - 10 星币一次，入场券可抵一次",
+                "/中奖号码 - 机器人在固定范围内随机生成中奖号",
                 "/物品栏 - 长条列表查看 NPC 与皮肤",
                 "/NPC信息 角色名 - 查询获取途径、加成与技能",
             ],
@@ -316,6 +319,8 @@ class JubenNpcPlugin(Star):
             "抽奖": self.draw_cmd,
             "npc抽奖": self.draw_cmd,
             "NPC抽奖": self.draw_cmd,
+            "中奖号码": self.winning_number_cmd,
+            "开奖": self.winning_number_cmd,
         }
         for prefix, handler in no_space_handlers.items():
             if text.startswith(prefix) and text != prefix and not text[len(prefix): len(prefix) + 1].isspace():
@@ -469,6 +474,20 @@ class JubenNpcPlugin(Star):
         self._save_db()
 
         path = self._render_draw(player, results, coin_cost, ticket_used)
+        yield event.image_result(str(path))
+
+    @filter.command("中奖号码", alias={"开奖"})
+    async def winning_number_cmd(self, event: AstrMessageEvent):
+        number = random.randint(WINNING_NUMBER_MIN, WINNING_NUMBER_MAX)
+        path = self._render_text_card(
+            "中奖号码",
+            [
+                f"本次中奖号：{number:02d}",
+                f"随机范围：{WINNING_NUMBER_MIN}-{WINNING_NUMBER_MAX}",
+                "号码完全由机器人随机生成，用户输入的数字不会参与开奖。",
+            ],
+            subtitle="可用于群内活动抽签、抽奖或剧本杀入场号。",
+        )
         yield event.image_result(str(path))
 
     @filter.command("物品栏", alias={"NPC仓库", "npc仓库", "我的NPC"})
@@ -794,7 +813,7 @@ class JubenNpcPlugin(Star):
             "切换角色", "更换角色", "选择角色", "NPC信息", "npc信息", "查询NPC",
             "角色信息", "每日打卡", "我的星币", "NPC仓库", "npc仓库", "我的NPC",
             "状态栏", "角色状态", "抽奖", "npc抽奖", "NPC抽奖", "星币", "钱包",
-            "打卡", "查NPC", "物品栏",
+            "中奖号码", "开奖", "打卡", "查NPC", "物品栏",
         ]
         for prefix in sorted(command_prefixes, key=len, reverse=True):
             if text.startswith(prefix):
