@@ -301,6 +301,29 @@ class JubenNpcPlugin(Star):
         )
         yield event.image_result(str(path))
 
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=8)
+    async def direct_command_cmd(self, event: AstrMessageEvent):
+        text = (event.message_str or "").strip().lstrip("/!！")
+        no_space_handlers = {
+            "切换角色": self.switch_cmd,
+            "更换角色": self.switch_cmd,
+            "选择角色": self.switch_cmd,
+            "NPC信息": self.npc_info_cmd,
+            "npc信息": self.npc_info_cmd,
+            "查NPC": self.npc_info_cmd,
+            "查询NPC": self.npc_info_cmd,
+            "角色信息": self.npc_info_cmd,
+            "抽奖": self.draw_cmd,
+            "npc抽奖": self.draw_cmd,
+            "NPC抽奖": self.draw_cmd,
+        }
+        for prefix, handler in no_space_handlers.items():
+            if text.startswith(prefix) and text != prefix and not text[len(prefix): len(prefix) + 1].isspace():
+                async for result in handler(event):
+                    yield result
+                event.stop_event()
+                return
+
     @filter.command("星币", alias={"钱包", "我的星币"})
     async def wallet_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
@@ -315,28 +338,22 @@ class JubenNpcPlugin(Star):
         )
         yield event.image_result(str(path))
 
-    @filter.command("赠送星币", alias={"转账星币", "给星币"})
+    @filter.command("赠送星币", alias={"发放星币", "给星币", "加星币"})
     async def transfer_cmd(self, event: AstrMessageEvent):
-        sender = self._get_player(event)
         target_id, target_label, amount = self._parse_transfer(event)
         if not target_id or amount <= 0:
-            path = self._render_text_card("赠送失败", ["格式：/赠送星币 @群友 数量", "例如：/赠送星币 @小明 20"])
-            yield event.image_result(str(path))
-            return
-        if sender["coins"] < amount:
-            path = self._render_text_card("星币不足", [f"你的星币：{sender['coins']}", f"需要赠送：{amount}"])
+            path = self._render_text_card("发放失败", ["格式：/赠送星币 @群友 数量", "例如：/赠送星币 @小明 20"])
             yield event.image_result(str(path))
             return
 
         target = self._get_player_by_id(event, target_id, target_label)
-        sender["coins"] -= amount
         target["coins"] += amount
         self._save_db()
 
         path = self._render_text_card(
-            "赠送成功",
-            [f"你赠送给 {target_label} {amount} 个星币。", f"你的余额：{sender['coins']}", f"对方余额：{target['coins']}"],
-            subtitle="星币在本群剧本杀档案内流通。",
+            "星币已发放",
+            [f"对象：{target_label}", f"发放数量：{amount}", f"对方余额：{target['coins']}"],
+            subtitle="可用此命令给群员补发活动星币。",
         )
         yield event.image_result(str(path))
 
@@ -771,8 +788,18 @@ class JubenNpcPlugin(Star):
         return 5, LEVEL_REQUIREMENTS[-1], LEVEL_REQUIREMENTS[-1], 1.0
 
     def _arg_text(self, event: AstrMessageEvent) -> str:
-        text = event.message_str.strip()
-        text = re.sub(r"^[/！!]?[\w\u4e00-\u9fff]+", "", text, count=1).strip()
+        text = event.message_str.strip().lstrip("/!！").strip()
+        command_prefixes = [
+            "剧本杀帮助", "赠送星币", "发放星币", "赠送角色", "赠送NPC", "赠送皮肤",
+            "切换角色", "更换角色", "选择角色", "NPC信息", "npc信息", "查询NPC",
+            "角色信息", "每日打卡", "我的星币", "NPC仓库", "npc仓库", "我的NPC",
+            "状态栏", "角色状态", "抽奖", "npc抽奖", "NPC抽奖", "星币", "钱包",
+            "打卡", "查NPC", "物品栏",
+        ]
+        for prefix in sorted(command_prefixes, key=len, reverse=True):
+            if text.startswith(prefix):
+                return text[len(prefix):].strip()
+        text = re.sub(r"^[\w\u4e00-\u9fff]+", "", text, count=1).strip()
         return text
 
     def _parse_count(self, event: AstrMessageEvent, default: int, max_count: int) -> int:
@@ -1050,10 +1077,10 @@ class JubenNpcPlugin(Star):
     def _render_status(self, player: Dict[str, Any], character: Dict[str, Any], banner: str = "") -> Path:
         path = self.render_dir / f"status_{player['user_id']}_{character['id']}.png"
         main, _, dark = character["colors"]
-        img = self._gradient((1280, 760), dark, "#f4f7fb").convert("RGBA")
+        img = self._gradient((1280, 840), dark, "#f4f7fb").convert("RGBA")
         draw = ImageDraw.Draw(img)
-        img.alpha_composite(self._portrait(character, (520, 650)), (55, 70))
-        draw.rounded_rectangle((530, 70, 1215, 725), radius=24, fill=(255, 255, 255, 235))
+        img.alpha_composite(self._portrait(character, (520, 730)), (55, 70))
+        draw.rounded_rectangle((530, 70, 1215, 805), radius=24, fill=(255, 255, 255, 235))
 
         if banner:
             draw.rounded_rectangle((565, 95, 845, 142), radius=18, fill=main)
