@@ -12,21 +12,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
-
-try:
-    from astrbot.api.web import (
-        PluginUploadFile,
-        error_response,
-        file_response,
-        json_response,
-        request,
-    )
-except Exception:
-    PluginUploadFile = None
-    request = None
-    json_response = None
-    error_response = None
-    file_response = None
+from quart import jsonify, request, send_file
 
 
 LEVEL_REQUIREMENTS = [1000, 2000, 3000, 4000, 5000]
@@ -508,11 +494,11 @@ class JubenNpcPlugin(Star):
         yield event.image_result(str(path))
 
     def _register_page_apis(self, context: Context):
-        if not hasattr(context, "register_web_api") or request is None:
+        if not hasattr(context, "register_web_api"):
             return
 
         async def list_characters():
-            return json_response(
+            return jsonify(
                 {
                     "characters": self.characters,
                     "players": self._known_players(),
@@ -534,15 +520,15 @@ class JubenNpcPlugin(Star):
                 self.characters.append(character)
             self._save_characters()
             self._ensure_assets()
-            return json_response({"ok": True, "character": character})
+            return jsonify({"ok": True, "character": character})
 
         async def delete_character(character_id: str):
             if character_id == "rin":
-                return error_response("默认初始角色不能删除。", 400)
+                return jsonify({"status": "error", "message": "默认初始角色不能删除。"}), 400
             before = len(self.characters)
             self.characters = [item for item in self.characters if item["id"] != character_id]
             self._save_characters()
-            return json_response({"ok": True, "deleted": before != len(self.characters)})
+            return jsonify({"ok": True, "deleted": before != len(self.characters)})
 
         async def upload_image():
             files = await request.files()
@@ -552,12 +538,12 @@ class JubenNpcPlugin(Star):
             elif isinstance(files, list):
                 file = files[0] if files else None
             if file is None:
-                return error_response("没有收到图片文件。", 400)
+                return jsonify({"status": "error", "message": "没有收到图片文件。"}), 400
             saved_name = await self._save_uploaded_image(file)
-            return json_response({"ok": True, "image": saved_name, "url": f"assets/{saved_name}"})
+            return jsonify({"ok": True, "image": saved_name, "url": f"assets/{saved_name}"})
 
         async def list_checkin_templates():
-            return json_response({"checkin_templates": self.checkin_templates})
+            return jsonify({"checkin_templates": self.checkin_templates})
 
         async def save_checkin_template():
             data = (await request.json()) or {}
@@ -569,7 +555,7 @@ class JubenNpcPlugin(Star):
             else:
                 self.checkin_templates.append(template)
             self._save_checkin_templates()
-            return json_response({"ok": True, "template": template})
+            return jsonify({"ok": True, "template": template})
 
         async def delete_checkin_template(template_id: str):
             before = len(self.checkin_templates)
@@ -577,15 +563,15 @@ class JubenNpcPlugin(Star):
             if not self.checkin_templates:
                 self.checkin_templates = [self._default_checkin_template()]
             self._save_checkin_templates()
-            return json_response({"ok": True, "deleted": before != len(self.checkin_templates)})
+            return jsonify({"ok": True, "deleted": before != len(self.checkin_templates)})
 
         async def upload_checkin_background():
             files = await request.files()
             file = files.get("file") if hasattr(files, "get") else (files[0] if files else None)
             if file is None:
-                return error_response("没有收到背景图片文件。", 400)
+                return jsonify({"status": "error", "message": "没有收到背景图片文件。"}), 400
             saved_name = await self._save_uploaded_image(file, self.checkin_assets_dir, "checkin")
-            return json_response({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
+            return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
 
         async def grant_character():
             data = await request.json()
@@ -595,32 +581,32 @@ class JubenNpcPlugin(Star):
             character_id = str(data.get("character_id", "")).strip()
             name = str(data.get("name", user_id)).strip() or user_id
             if not scope_id or not user_id or not self._character_or_none(character_id):
-                return error_response("scope_id、user_id 或 character_id 无效。", 400)
+                return jsonify({"status": "error", "message": "scope_id、user_id 或 character_id 无效。"}), 400
             player = self._get_player_by_scope(scope_id, user_id, name)
             created = self._grant_character(player, character_id)
             self._save_db()
-            return json_response({"ok": True, "created": created, "player": player})
+            return jsonify({"ok": True, "created": created, "player": player})
 
         async def get_asset(filename: str):
             safe_name = Path(filename).name
             path = self.assets_dir / safe_name
             if not path.exists():
-                return error_response("图片不存在。", 404)
-            return file_response(str(path))
+                return jsonify({"status": "error", "message": "图片不存在。"}), 404
+            return await send_file(path)
 
         async def get_checkin_asset(filename: str):
             path = self.checkin_assets_dir / Path(filename).name
             if not path.exists():
-                return error_response("背景图片不存在。", 404)
-            return file_response(str(path))
+                return jsonify({"status": "error", "message": "背景图片不存在。"}), 404
+            return await send_file(path)
 
         context.register_web_api(f"/{PLUGIN_NAME}/characters", list_characters, ["GET"], "List NPC characters")
         context.register_web_api(f"/{PLUGIN_NAME}/characters", save_character, ["POST"], "Save NPC character")
-        context.register_web_api(f"/{PLUGIN_NAME}/characters/<character_id>", delete_character, ["DELETE"], "Delete NPC character")
+        context.register_web_api(f"/{PLUGIN_NAME}/characters/<character_id>/delete", delete_character, ["POST"], "Delete NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-image", upload_image, ["POST"], "Upload NPC image")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates", list_checkin_templates, ["GET"], "List check-in templates")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates", save_checkin_template, ["POST"], "Save check-in template")
-        context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/<template_id>", delete_checkin_template, ["DELETE"], "Delete check-in template")
+        context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/<template_id>/delete", delete_checkin_template, ["POST"], "Delete check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-background", upload_checkin_background, ["POST"], "Upload check-in background")
         context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/assets/<filename>", get_asset, ["GET"], "Get NPC image")

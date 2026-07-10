@@ -11,17 +11,15 @@ const bridge = () => window.AstrBotPluginPage || {};
 
 async function apiGet(path) {
   const api = bridge();
-  const endpoint = path.replace(/^\//, '');
-  if (api.apiGet) return api.apiGet(endpoint);
-  if (api.request) return api.request({ method: 'GET', path: endpoint });
+  if (api.apiGet) return api.apiGet(path);
+  if (api.request) return api.request({ method: 'GET', path });
   return fetch(`/api/v1/plugins/extensions/${PLUGIN}${path}`).then((res) => res.json());
 }
 
 async function apiPost(path, data) {
   const api = bridge();
-  const endpoint = path.replace(/^\//, '');
-  if (api.apiPost) return api.apiPost(endpoint, data);
-  if (api.request) return api.request({ method: 'POST', path: endpoint, data });
+  if (api.apiPost) return api.apiPost(path, data);
+  if (api.request) return api.request({ method: 'POST', path, data });
   return fetch(`/api/v1/plugins/extensions/${PLUGIN}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -30,17 +28,12 @@ async function apiPost(path, data) {
 }
 
 async function apiDelete(path) {
-  const api = bridge();
-  const endpoint = path.replace(/^\//, '');
-  if (api.apiDelete) return api.apiDelete(endpoint);
-  if (api.request) return api.request({ method: 'DELETE', path: endpoint });
-  return fetch(`/api/v1/plugins/extensions/${PLUGIN}${path}`, { method: 'DELETE' }).then((res) => res.json());
+  return apiPost(`${path}/delete`, {});
 }
 
 async function upload(path, file) {
   const api = bridge();
-  const endpoint = path.replace(/^\//, '');
-  if (api.upload) return api.upload(endpoint, file);
+  if (api.upload) return api.upload(path, file);
 
   const form = new FormData();
   form.append('file', file);
@@ -50,8 +43,8 @@ async function upload(path, file) {
 function assetUrl(image, kind = 'assets') {
   if (!image) return '';
   const api = bridge();
-  if (api.getApiUrl) return api.getApiUrl(`${kind}/${encodeURIComponent(image)}`);
-  return `/api/v1/plugins/extensions/${PLUGIN}/${kind}/${encodeURIComponent(image)}`;
+  if (api.getApiUrl) return api.getApiUrl(`/${kind}/${encodeURIComponent(image)}`);
+  return `/api/plug/${PLUGIN}/${kind}/${encodeURIComponent(image)}`;
 }
 
 function toast(message) {
