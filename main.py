@@ -1,3 +1,4 @@
+import base64
 import json
 import inspect
 import random
@@ -5,13 +6,14 @@ import re
 import shutil
 import urllib.request
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 from quart import jsonify, request, send_file
 
 
@@ -36,135 +38,20 @@ DOWNLOADABLE_FONTS = [
     ),
 ]
 PLUGIN_NAME = "astrbot_plugin_juben_npc"
+RETIRED_CHARACTER_IDS = {
+    "rin",
+    "yue",
+    "mika",
+    "noa",
+    "iori",
+    "sora",
+    "kuro",
+    "hana",
+    "akito",
+}
 
 
 DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
-    {
-        "id": "rin",
-        "name": "星见凛",
-        "base": "星见凛",
-        "skin": "默认",
-        "star": "SSR",
-        "route": "月度大奖池 / 新人初始赠送",
-        "bonus": "推理经验 +10%",
-        "intro": "来自星轨剧团的侦探少女，擅长从细碎证词里找出不合拍的音符。",
-        "skills": [["星屑直觉", "调查阶段额外获得一条线索提示。"], ["幕间追问", "每局可指定一次追问方向。"], ["终幕推演", "结算经验额外 +20%。"]],
-        "colors": ["#6c8cff", "#f4d35e", "#10172a"],
-        "image": "rin.png",
-        "featured": True,
-    },
-    {
-        "id": "yue",
-        "name": "月白",
-        "base": "月白",
-        "skin": "默认",
-        "star": "SR",
-        "route": "月度大奖池 / 抽奖概率获得",
-        "bonus": "社交经验 +8%",
-        "intro": "温柔但危险的情报商，越是安静的房间，越藏着她想要的答案。",
-        "skills": [["银月侧写", "社交检定经验提升。"], ["无声交易", "礼物转化经验 +10%。"], ["月影同盟", "队友结算加成 +5%。"]],
-        "colors": ["#9ad7ff", "#f7f7ff", "#213047"],
-        "image": "yue.png",
-        "featured": True,
-    },
-    {
-        "id": "mika",
-        "name": "赤羽弥香",
-        "base": "赤羽弥香",
-        "skin": "默认",
-        "star": "SSR",
-        "route": "月度大奖池限定",
-        "bonus": "战斗经验 +12%",
-        "intro": "红发行动派，喜欢用最直接的办法把谜题砸开，再把碎片拼回真相。",
-        "skills": [["焰羽突入", "行动类任务经验增加。"], ["破局连击", "抽奖礼物经验 +12%。"], ["红莲审判", "大奖池角色经验 +25%。"]],
-        "colors": ["#ff6464", "#ffd166", "#2a1018"],
-        "image": "mika.png",
-        "featured": True,
-    },
-    {
-        "id": "noa",
-        "name": "诺娅",
-        "base": "诺娅",
-        "skin": "默认",
-        "star": "R",
-        "route": "常驻抽奖 / 活动兑换",
-        "bonus": "通用经验 +5%",
-        "intro": "负责记录档案的机械少女，表情很少，但数据库里从不遗漏任何异常。",
-        "skills": [["档案索引", "查看 NPC 信息时显示额外备注。"], ["数据补正", "每日打卡星币 +1 概率提升。"], ["零点归档", "每月首次抽奖半价。"]],
-        "colors": ["#62d6c7", "#e8f7ff", "#102825"],
-        "image": "noa.png",
-        "featured": False,
-    },
-    {
-        "id": "iori",
-        "name": "伊织",
-        "base": "伊织",
-        "skin": "默认",
-        "star": "SR",
-        "route": "常驻抽奖",
-        "bonus": "观察经验 +8%",
-        "intro": "旧书店的看板娘，能从纸张气味和墨迹深浅里读到时间留下的暗语。",
-        "skills": [["书页暗纹", "线索阅读经验增加。"], ["旧章回声", "失败结算保底经验提升。"], ["未署名真相", "隐藏线索概率提升。"]],
-        "colors": ["#c89b6d", "#fff0d6", "#2b2017"],
-        "image": "iori.png",
-        "featured": False,
-    },
-    {
-        "id": "sora",
-        "name": "空",
-        "base": "空",
-        "skin": "默认",
-        "star": "R",
-        "route": "常驻抽奖 / 免费入场券活动",
-        "bonus": "移动经验 +6%",
-        "intro": "轻装潜入者，总是笑着说自己只是路过，但每次路过都能带走关键证据。",
-        "skills": [["轻身步", "探索经验增加。"], ["屋顶视野", "获得额外场景提示。"], ["夜风归途", "消耗入场券时经验提升。"]],
-        "colors": ["#7bd88f", "#efffdc", "#122816"],
-        "image": "sora.png",
-        "featured": False,
-    },
-    {
-        "id": "kuro",
-        "name": "黑泽莲",
-        "base": "黑泽莲",
-        "skin": "默认",
-        "star": "SSR",
-        "route": "月度大奖池限定",
-        "bonus": "心理经验 +12%",
-        "intro": "冷静的心理医生，擅长让谎言在沉默里自己露出破绽。",
-        "skills": [["微表情", "审讯经验增加。"], ["沉默处方", "可减少一次错误惩罚。"], ["深渊共鸣", "心理线结算经验 +30%。"]],
-        "colors": ["#5e5ce6", "#b8b5ff", "#111122"],
-        "image": "kuro.png",
-        "featured": True,
-    },
-    {
-        "id": "hana",
-        "name": "花梨",
-        "base": "花梨",
-        "skin": "默认",
-        "star": "R",
-        "route": "常驻抽奖",
-        "bonus": "治愈经验 +5%",
-        "intro": "医学院实习生，随身携带糖果、绷带，以及一套过分锋利的推理逻辑。",
-        "skills": [["急救包", "团队支援经验增加。"], ["甜味安抚", "打卡获得礼物概率提升。"], ["白花宣誓", "队友失败时返还少量经验。"]],
-        "colors": ["#ff9ac8", "#fff1f6", "#321322"],
-        "image": "hana.png",
-        "featured": False,
-    },
-    {
-        "id": "akito",
-        "name": "晓斗",
-        "base": "晓斗",
-        "skin": "默认",
-        "star": "SR",
-        "route": "常驻抽奖 / 活动兑换",
-        "bonus": "机关经验 +8%",
-        "intro": "钟表匠少年，迷恋所有会转动的机关，也擅长让时间为自己作证。",
-        "skills": [["齿轮听诊", "机关检定经验增加。"], ["倒转秒针", "每日一次小额经验补偿。"], ["零时钟塔", "机关线结算经验 +25%。"]],
-        "colors": ["#f6b93b", "#e9f5ff", "#2a210d"],
-        "image": "akito.png",
-        "featured": False,
-    },
     {
         "id": "blue_hour_cafe",
         "name": "蓝时咖啡",
@@ -176,7 +63,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
         "intro": "银发女仆在蓝色午后里守着窗边席位，甜点、红茶和冰冷剑锋都摆放得恰到好处。",
         "skills": [["午后礼仪", "社交与推理经验提升。"], ["蓝调侍奉", "礼物转化经验 +15%。"], ["寒光茶歇", "月度皮肤结算经验 +25%。"]],
         "colors": ["#7d9fc2", "#eaf4ff", "#1c2a3f"],
-        "image": "blue_hour_cafe.png",
+        "image": "blue_hour_cafe.jpg",
         "featured": True,
     },
     {
@@ -190,7 +77,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
         "intro": "棋盘上的每一步都像一封无声邀请，她从容地把局势推进到最优雅的将死。",
         "skills": [["棋谱预判", "机关与策略经验提升。"], ["临界一步", "失败结算保底经验提升。"], ["贵族终局", "高星剧本结算经验 +25%。"]],
         "colors": ["#31517f", "#f3d98a", "#2a2430"],
-        "image": "noble_afternoon.png",
+        "image": "noble_afternoon.jpg",
         "featured": True,
     },
     {
@@ -204,7 +91,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
         "intro": "红色咖啡馆里，猫耳女仆以笑容招待来客，也用敏锐观察记录每一次停顿。",
         "skills": [["红茶礼节", "社交经验提升。"], ["双影招待", "组队结算额外获得经验。"], ["灯影谢幕", "活动剧本经验 +20%。"]],
         "colors": ["#8b2531", "#f4dfd8", "#2b0f14"],
-        "image": "cafe_lumiere.png",
+        "image": "cafe_lumiere.jpg",
         "featured": False,
     },
     {
@@ -218,7 +105,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
         "intro": "黑衣少女坐在灰堡废墟里，银刃立于身侧，安静得像一场还未开始的审判。",
         "skills": [["灰堡伏击", "战斗线经验提升。"], ["银刃处决", "大奖重复转化经验提升。"], ["冷焰归鞘", "战斗结算经验 +30%。"]],
         "colors": ["#505866", "#dce6f0", "#111419"],
-        "image": "ash_silver_blade.png",
+        "image": "ash_silver_blade.jpg",
         "featured": True,
     },
     {
@@ -232,13 +119,13 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
         "intro": "晨光落在白瓷杯沿，银发女仆端起咖啡，仿佛连线索也被阳光洗得透明。",
         "skills": [["晨光注视", "观察经验提升。"], ["白瓷回声", "礼物经验小幅提升。"], ["蓝窗独白", "探索结算经验 +20%。"]],
         "colors": ["#a8c6df", "#f7fbff", "#26384c"],
-        "image": "blue_cafe_morning.png",
+        "image": "blue_cafe_morning.jpg",
         "featured": False,
     },
 ]
 
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀 NPC 数据库、角色皮肤、星币、打卡、状态栏与抽奖插件", "1.1.0")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀 NPC 数据库、角色皮肤、星币、打卡、状态栏与抽奖插件", "1.2.0")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -283,8 +170,8 @@ class JubenNpcPlugin(Star):
             [
                 "/打卡 - 每天领取 1-3 星币或免费入场券",
                 "/星币 - 查看自己的星币与入场券",
-                "/赠送星币 @群友 数量 - 转赠星币",
-                "/赠送角色 @群友 角色名 - 赠送 NPC 或皮肤",
+                "/赠送星币 @群友 数量 - 管理员发放星币",
+                "/赠送角色 @群友 角色名 - 管理员赠送 NPC 或皮肤",
                 "/状态栏 - 查看当前 NPC 状态",
                 "/切换角色 角色名 - 更换当前 NPC 或皮肤",
                 "/抽奖 [次数] - 10 星币一次，入场券可抵一次",
@@ -337,6 +224,11 @@ class JubenNpcPlugin(Star):
 
     @filter.command("赠送星币", alias={"发放星币", "给星币", "加星币"})
     async def transfer_cmd(self, event: AstrMessageEvent):
+        denial = await self._operator_denial(event, "发放星币")
+        if denial:
+            yield event.image_result(str(denial))
+            return
+
         target_id, target_label, amount = self._parse_transfer(event)
         if not target_id or amount <= 0:
             path = self._render_text_card("发放失败", ["格式：/赠送星币 @群友 数量", "例如：/赠送星币 @小明 20"])
@@ -346,6 +238,14 @@ class JubenNpcPlugin(Star):
         target = self._get_player_by_id(event, target_id, target_label)
         target["coins"] += amount
         self._save_db()
+        logger.info(
+            "剧本杀星币发放：operator=%s scope=%s target=%s amount=%s balance=%s",
+            self._sender_id(event),
+            self._scope_id(event),
+            target_id,
+            amount,
+            target["coins"],
+        )
 
         path = self._render_text_card(
             "星币已发放",
@@ -356,6 +256,11 @@ class JubenNpcPlugin(Star):
 
     @filter.command("赠送角色", alias={"赠送NPC", "赠送皮肤", "给角色"})
     async def grant_character_cmd(self, event: AstrMessageEvent):
+        denial = await self._operator_denial(event, "赠送角色")
+        if denial:
+            yield event.image_result(str(denial))
+            return
+
         target_id, target_label = self._parse_target_user(event)
         character_name = self._parse_character_after_target(event)
         character = self._find_character(character_name)
@@ -371,6 +276,14 @@ class JubenNpcPlugin(Star):
         target = self._get_player_by_id(event, target_id, target_label)
         created = self._grant_character(target, character["id"])
         self._save_db()
+        logger.info(
+            "剧本杀角色赠送：operator=%s scope=%s target=%s character=%s created=%s",
+            self._sender_id(event),
+            self._scope_id(event),
+            target_id,
+            character["id"],
+            created,
+        )
         path = self._render_text_card(
             "角色已赠送",
             [f"对象：{target_label}", f"角色：{character['name']} / {character.get('skin', '默认')}", f"结果：{'新增拥有' if created else '已拥有，未重复添加'}"],
@@ -500,9 +413,23 @@ class JubenNpcPlugin(Star):
         async def list_characters():
             return jsonify(
                 {
-                    "characters": self.characters,
+                    "characters": [
+                        {
+                            **character,
+                            "preview": self._thumbnail_data_url(self.assets_dir / character["image"]),
+                        }
+                        for character in self.characters
+                    ],
                     "players": self._known_players(),
-                    "checkin_templates": self.checkin_templates,
+                    "checkin_templates": [
+                        {
+                            **template,
+                            "preview": self._thumbnail_data_url(
+                                self.checkin_assets_dir / template.get("image", "")
+                            ),
+                        }
+                        for template in self.checkin_templates
+                    ],
                 }
             )
 
@@ -523,15 +450,15 @@ class JubenNpcPlugin(Star):
             return jsonify({"ok": True, "character": character})
 
         async def delete_character(character_id: str):
-            if character_id == "rin":
-                return jsonify({"status": "error", "message": "默认初始角色不能删除。"}), 400
+            if len(self.characters) <= 1 and self._character_or_none(character_id):
+                return jsonify({"status": "error", "message": "至少需要保留一个初始角色。"}), 400
             before = len(self.characters)
             self.characters = [item for item in self.characters if item["id"] != character_id]
             self._save_characters()
             return jsonify({"ok": True, "deleted": before != len(self.characters)})
 
         async def upload_image():
-            files = await request.files()
+            files = await request.files
             file = None
             if hasattr(files, "get"):
                 file = files.get("file")
@@ -539,7 +466,10 @@ class JubenNpcPlugin(Star):
                 file = files[0] if files else None
             if file is None:
                 return jsonify({"status": "error", "message": "没有收到图片文件。"}), 400
-            saved_name = await self._save_uploaded_image(file)
+            try:
+                saved_name = await self._save_uploaded_image(file)
+            except (ValueError, OSError) as exc:
+                return jsonify({"status": "error", "message": str(exc)}), 400
             return jsonify({"ok": True, "image": saved_name, "url": f"assets/{saved_name}"})
 
         async def list_checkin_templates():
@@ -566,12 +496,28 @@ class JubenNpcPlugin(Star):
             return jsonify({"ok": True, "deleted": before != len(self.checkin_templates)})
 
         async def upload_checkin_background():
-            files = await request.files()
+            files = await request.files
             file = files.get("file") if hasattr(files, "get") else (files[0] if files else None)
             if file is None:
                 return jsonify({"status": "error", "message": "没有收到背景图片文件。"}), 400
-            saved_name = await self._save_uploaded_image(file, self.checkin_assets_dir, "checkin")
+            try:
+                saved_name = await self._save_uploaded_image(file, self.checkin_assets_dir, "checkin")
+            except (ValueError, OSError) as exc:
+                return jsonify({"status": "error", "message": str(exc)}), 400
             return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
+
+        async def preview_checkin_template():
+            data = (await request.get_json()) or {}
+            template = self._normalize_checkin_template(data)
+            values = {
+                "title": "打卡成功",
+                "reward": "获得：3 星币",
+                "coins": 128,
+                "tickets": 2,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+            }
+            img = self._compose_checkin_image(template, values)
+            return jsonify({"ok": True, "preview": self._image_data_url(img)})
 
         async def grant_character():
             data = await request.get_json()
@@ -608,6 +554,7 @@ class JubenNpcPlugin(Star):
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates", save_checkin_template, ["POST"], "Save check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/<template_id>/delete", delete_checkin_template, ["POST"], "Delete check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-background", upload_checkin_background, ["POST"], "Upload check-in background")
+        context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/preview", preview_checkin_template, ["POST"], "Preview check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/assets/<filename>", get_asset, ["GET"], "Get NPC image")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-assets/<filename>", get_checkin_asset, ["GET"], "Get check-in background")
@@ -634,7 +581,11 @@ class JubenNpcPlugin(Star):
         try:
             loaded = json.loads(self.characters_path.read_text(encoding="utf-8"))
             characters = loaded.get("characters", loaded) if isinstance(loaded, dict) else loaded
-            self.characters = [self._normalize_character(item) for item in characters]
+            normalized = [self._normalize_character(item) for item in characters]
+            self.characters = [item for item in normalized if item["id"] not in RETIRED_CHARACTER_IDS]
+            retired_count = len(normalized) - len(self.characters)
+            if retired_count:
+                logger.info(f"已移除 {retired_count} 个停用的旧 NPC 条目。")
         except Exception as exc:
             logger.error(f"读取角色配置失败，将使用默认角色：{exc}")
             self.characters = [self._normalize_character(item) for item in DEFAULT_CHARACTERS]
@@ -691,7 +642,8 @@ class JubenNpcPlugin(Star):
         raw_texts = data.get("texts") if isinstance(data.get("texts"), dict) else {}
         for key, defaults in base["texts"].items():
             source = raw_texts.get(key) if isinstance(raw_texts.get(key), dict) else {}
-            defaults["text"] = str(source.get("text") or defaults["text"])[:180]
+            if "text" in source:
+                defaults["text"] = str(source.get("text") or "")[:180]
             defaults["x"] = self._template_number(source.get("x"), defaults["x"], 0, 1)
             defaults["y"] = self._template_number(source.get("y"), defaults["y"], 0, 1)
             defaults["size"] = self._template_number(source.get("size"), defaults["size"], 0.015, 0.15)
@@ -774,6 +726,17 @@ class JubenNpcPlugin(Star):
                     pass
         return str(getattr(event, "unified_msg_origin", "global"))
 
+    def _group_id(self, event: AstrMessageEvent) -> str:
+        """Return a real group ID only; never treat a private session as a group."""
+        func = getattr(event, "get_group_id", None)
+        if not callable(func):
+            return ""
+        try:
+            value = func()
+            return str(value) if value else ""
+        except Exception:
+            return ""
+
     def _sender_id(self, event: AstrMessageEvent) -> str:
         for name in ("get_sender_id", "get_user_id"):
             func = getattr(event, name, None)
@@ -785,6 +748,72 @@ class JubenNpcPlugin(Star):
                 except Exception:
                     pass
         return event.get_sender_name()
+
+    async def _operator_denial(self, event: AstrMessageEvent, action: str) -> Optional[Path]:
+        allowed, message = await self._ensure_operator_permission(event)
+        if allowed:
+            return None
+        return self._render_text_card(
+            f"{action}：权限不足",
+            [message],
+            subtitle="该操作会直接改变玩家资产，仅限本群群主、群管理员或 AstrBot 管理员。",
+        )
+
+    async def _ensure_operator_permission(self, event: AstrMessageEvent) -> Tuple[bool, str]:
+        """Allow AstrBot admins or real-time verified QQ group owners/admins."""
+        is_admin = getattr(event, "is_admin", None)
+        if callable(is_admin):
+            try:
+                if is_admin():
+                    return True, "AstrBot 管理员授权。"
+            except Exception:
+                pass
+
+        group_id = self._group_id(event)
+        sender_id = self._sender_id(event)
+        if not group_id or not sender_id:
+            return False, "私聊中仅 AstrBot 管理员可以执行该操作。"
+
+        try:
+            group_number = int(group_id)
+            sender_number = int(sender_id)
+        except (TypeError, ValueError):
+            return False, "无法识别群号或发送者 QQ，已拒绝执行。"
+
+        ok, info = await self._onebot_call_raw(
+            event,
+            "get_group_member_info",
+            group_id=group_number,
+            user_id=sender_number,
+            no_cache=True,
+        )
+        if not ok:
+            return False, "无法实时验证你的 QQ 群权限，已拒绝执行。"
+
+        if isinstance(info, dict) and isinstance(info.get("data"), dict):
+            info = info["data"]
+        role = str(info.get("role") or "").lower() if isinstance(info, dict) else ""
+        if role in {"owner", "admin"}:
+            return True, f"已验证 QQ 群权限：{role}。"
+        return False, "仅本群群主、群管理员或 AstrBot 管理员可以执行该操作。"
+
+    @staticmethod
+    async def _onebot_call_raw(event: AstrMessageEvent, action: str, **payload: Any) -> Tuple[bool, Any]:
+        get_platform_name = getattr(event, "get_platform_name", None)
+        try:
+            platform_name = get_platform_name() if callable(get_platform_name) else ""
+        except Exception:
+            platform_name = ""
+        bot = getattr(event, "bot", None)
+        api = getattr(bot, "api", None)
+        call_action = getattr(api, "call_action", None)
+        if platform_name != "aiocqhttp" or not callable(call_action):
+            return False, "当前平台不支持 OneBot 实时群权限查询。"
+        try:
+            return True, await call_action(action, **payload)
+        except Exception:
+            logger.exception("剧本杀插件 OneBot API 调用失败：%s", action)
+            return False, "OneBot API 调用失败。"
 
     def _scope(self, event: AstrMessageEvent) -> Dict[str, Any]:
         return self._db_scope(self._scope_id(event))
@@ -837,6 +866,35 @@ class JubenNpcPlugin(Star):
                 value.setdefault("owned_at", "")
             else:
                 npcs[character_id] = {"exp": 0, "owned_at": ""}
+
+        retired_exp = 0
+        for character_id in list(npcs.keys()):
+            if character_id not in RETIRED_CHARACTER_IDS:
+                continue
+            retired = npcs.pop(character_id)
+            try:
+                retired_exp += max(0, int(retired.get("exp", 0)))
+            except (TypeError, ValueError):
+                pass
+
+        if retired_exp:
+            replacement_id = next(
+                (character_id for character_id in npcs if self._character_or_none(character_id)),
+                self.characters[0]["id"],
+            )
+            replacement = npcs.setdefault(
+                replacement_id,
+                {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")},
+            )
+            replacement["exp"] = max(0, int(replacement.get("exp", 0))) + retired_exp
+
+        if player.get("current_npc") in RETIRED_CHARACTER_IDS:
+            valid_owned = next(
+                (character_id for character_id in npcs if self._character_or_none(character_id)),
+                None,
+            )
+            player["current_npc"] = valid_owned or self.characters[0]["id"]
+
         for character_id in list(npcs.keys()):
             if not self._character_or_none(character_id):
                 logger.info(f"玩家拥有未知角色 {character_id}，暂时保留数据。")
@@ -1011,7 +1069,7 @@ class JubenNpcPlugin(Star):
         raw_name = Path(getattr(upload, "filename", "") or "character.png").name
         suffix = Path(raw_name).suffix.lower()
         if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
-            suffix = ".png"
+            raise ValueError("仅支持 PNG、JPG、JPEG 或 WebP 图片。")
         saved_name = f"{prefix}_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}{suffix}"
         dest = (destination or self.assets_dir) / saved_name
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1025,8 +1083,36 @@ class JubenNpcPlugin(Star):
                 shutil.copyfile(str(source_path), dest)
             else:
                 raise RuntimeError("当前 AstrBot 上传对象不支持保存。")
-        Image.open(dest).verify()
+        try:
+            with Image.open(dest) as image:
+                image.verify()
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise ValueError("上传文件不是有效图片或图片已损坏。")
         return saved_name
+
+    @staticmethod
+    def _image_data_url(image: Image.Image) -> str:
+        buffer = BytesIO()
+        image.convert("RGB").save(buffer, format="JPEG", quality=88, optimize=True)
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/jpeg;base64,{encoded}"
+
+    def _thumbnail_data_url(self, path: Path, size: Tuple[int, int] = (320, 180)) -> str:
+        if not path.is_file():
+            return ""
+        try:
+            with Image.open(path) as source:
+                image = ImageOps.exif_transpose(source).convert("RGB")
+                image.thumbnail(size, Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", size, "#edf2f7")
+                left = (size[0] - image.width) // 2
+                top = (size[1] - image.height) // 2
+                canvas.paste(image, (left, top))
+                return self._image_data_url(canvas)
+        except Exception as exc:
+            logger.warning(f"生成后台图片预览失败：{path.name}，原因：{exc}")
+            return ""
 
     def _ensure_fonts(self):
         if self._find_font_file(False) and self._find_font_file(True):
@@ -1156,7 +1242,8 @@ class JubenNpcPlugin(Star):
         path = self.assets_dir / character["image"]
         if not path.exists():
             self._draw_placeholder_portrait(character, path)
-        img = Image.open(path).convert("RGBA")
+        with Image.open(path) as source:
+            img = ImageOps.exif_transpose(source).convert("RGBA")
         scale = max(size[0] / img.width, size[1] / img.height)
         resized = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
         left = max(0, (resized.width - size[0]) // 2)
@@ -1187,6 +1274,20 @@ class JubenNpcPlugin(Star):
         """Render a full-bleed 16:9 check-in card using a template's own text layout."""
         enabled = [item for item in self.checkin_templates if item.get("enabled")]
         template = random.choice(enabled or self.checkin_templates or [self._default_checkin_template()])
+        values = {
+            "title": title,
+            "reward": reward,
+            "coins": player.get("coins", 0),
+            "tickets": player.get("tickets", 0),
+            "date": today or datetime.now().strftime("%Y-%m-%d"),
+        }
+        img = self._compose_checkin_image(template, values)
+        path = self.render_dir / f"checkin_{player['user_id']}_{datetime.now().timestamp()}.png"
+        img.save(path)
+        return path
+
+    def _compose_checkin_image(self, template: Dict[str, Any], values: Dict[str, Any]) -> Image.Image:
+        """Compose one template so WebUI preview and QQ output share exactly the same renderer."""
         size = (1280, 720)
         image_name = str(template.get("image") or "")
         background_path = self.checkin_assets_dir / Path(image_name).name
@@ -1196,15 +1297,8 @@ class JubenNpcPlugin(Star):
             img = self._gradient(size, "#18243c", "#2f6b6d").convert("RGBA")
 
         draw = ImageDraw.Draw(img)
-        values = {
-            "title": title,
-            "reward": reward,
-            "coins": player.get("coins", 0),
-            "tickets": player.get("tickets", 0),
-            "date": today or datetime.now().strftime("%Y-%m-%d"),
-        }
         for item in template.get("texts", {}).values():
-            text = str(item.get("text") or "").format(**values)
+            text = self._format_template_text(str(item.get("text") or ""), values)
             if not text:
                 continue
             font_size = max(14, int(float(item.get("size", 0.04)) * size[0]))
@@ -1215,13 +1309,23 @@ class JubenNpcPlugin(Star):
             # A small shadow keeps text readable on user-supplied art without adding borders or panels.
             draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 130))
             draw.text((x, y), text, font=font, fill=color)
-        path = self.render_dir / f"checkin_{player['user_id']}_{datetime.now().timestamp()}.png"
-        img.save(path)
-        return path
+        return img
+
+    @staticmethod
+    def _format_template_text(template: str, values: Dict[str, Any]) -> str:
+        class SafeValues(dict):
+            def __missing__(self, key: str) -> str:
+                return "{" + key + "}"
+
+        try:
+            return template.format_map(SafeValues(values))
+        except (ValueError, AttributeError):
+            return template
 
     @staticmethod
     def _cover_image(path: Path, size: Tuple[int, int]) -> Image.Image:
-        source = Image.open(path).convert("RGBA")
+        with Image.open(path) as opened:
+            source = ImageOps.exif_transpose(opened).convert("RGBA")
         scale = max(size[0] / source.width, size[1] / source.height)
         resized = source.resize((round(source.width * scale), round(source.height * scale)), Image.Resampling.LANCZOS)
         left = max(0, (resized.width - size[0]) // 2)

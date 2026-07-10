@@ -9,22 +9,36 @@ let selectedTemplateId = '';
 
 const bridge = () => window.AstrBotPluginPage || {};
 
+function endpoint(path) {
+  return String(path || '').trim().replace(/^\/+/, '');
+}
+
+async function parseResponse(response) {
+  const payload = await response.json();
+  if (!response.ok || payload?.status === 'error') {
+    throw new Error(payload?.message || `请求失败（HTTP ${response.status}）`);
+  }
+  return payload;
+}
+
 async function apiGet(path) {
   const api = bridge();
-  if (api.apiGet) return api.apiGet(path);
-  if (api.request) return api.request({ method: 'GET', path });
-  return fetch(`/api/v1/plugins/extensions/${PLUGIN}${path}`).then((res) => res.json());
+  const target = endpoint(path);
+  if (api.apiGet) return api.apiGet(target);
+  if (api.request) return api.request({ method: 'GET', path: target });
+  return parseResponse(await fetch(`/api/plug/${encodeURIComponent(PLUGIN)}/${target}`));
 }
 
 async function apiPost(path, data) {
   const api = bridge();
-  if (api.apiPost) return api.apiPost(path, data);
-  if (api.request) return api.request({ method: 'POST', path, data });
-  return fetch(`/api/v1/plugins/extensions/${PLUGIN}${path}`, {
+  const target = endpoint(path);
+  if (api.apiPost) return api.apiPost(target, data);
+  if (api.request) return api.request({ method: 'POST', path: target, data });
+  return parseResponse(await fetch(`/api/plug/${encodeURIComponent(PLUGIN)}/${target}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }).then((res) => res.json());
+  }));
 }
 
 async function apiDelete(path) {
@@ -33,17 +47,16 @@ async function apiDelete(path) {
 
 async function upload(path, file) {
   const api = bridge();
-  if (api.upload) return api.upload(path, file);
+  const target = endpoint(path);
+  if (api.upload) return api.upload(target, file);
 
   const form = new FormData();
   form.append('file', file);
-  return fetch(`/api/v1/plugins/extensions/${PLUGIN}${path}`, { method: 'POST', body: form }).then((res) => res.json());
+  return parseResponse(await fetch(`/api/plug/${encodeURIComponent(PLUGIN)}/${target}`, { method: 'POST', body: form }));
 }
 
 function assetUrl(image, kind = 'assets') {
   if (!image) return '';
-  const api = bridge();
-  if (api.getApiUrl) return api.getApiUrl(`/${kind}/${encodeURIComponent(image)}`);
   return `/api/plug/${PLUGIN}/${kind}/${encodeURIComponent(image)}`;
 }
 
@@ -82,7 +95,7 @@ function renderList() {
     item.type = 'button';
     item.className = `character-item ${character.id === selectedId ? 'active' : ''}`;
     item.innerHTML = `
-      <img src="${assetUrl(character.image)}" alt="" />
+      <img src="${character.preview || assetUrl(character.image)}" alt="" />
       <span>
         <strong>${escapeHtml(character.name)}</strong>
         <span>${escapeHtml(character.skin || '默认')} · ${escapeHtml(character.star || 'R')}</span>
@@ -147,7 +160,7 @@ function fillForm(character) {
     form.elements[`skill${index}Desc`].value = skills[index]?.[1] || '';
   });
 
-  $('#preview-image').src = assetUrl(character.image);
+  $('#preview-image').src = character.preview || assetUrl(character.image);
   $('#preview-title').textContent = character.name || '未命名角色';
   $('#preview-subtitle').textContent = `${character.skin || '默认'} · ${character.star || 'R'} · ${character.image || '未上传图片'}`;
 }
@@ -216,7 +229,7 @@ $('#delete-button').addEventListener('click', async () => {
   const id = $('#character-form').elements.id.value.trim();
   if (!id) return;
   if (!window.confirm(`确定删除 ${id}？玩家已有数据不会自动删除。`)) return;
-  await apiDelete(`/characters/${encodeURIComponent(id)}`);
+  await apiDelete(`/characters/${id}`);
   selectedId = '';
   toast('已删除角色');
   await loadAll();
@@ -234,7 +247,7 @@ $('#upload-button').addEventListener('click', async () => {
     return;
   }
   $('#character-form').elements.image.value = result.image;
-  $('#preview-image').src = assetUrl(result.image);
+  $('#preview-image').src = URL.createObjectURL(file);
   toast('图片已上传');
 });
 
@@ -286,7 +299,7 @@ function renderTemplateList() {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = `character-item ${template.id === selectedTemplateId ? 'active' : ''}`;
-    item.innerHTML = `<img src="${assetUrl(template.image, 'checkin-assets')}" alt="" /><span><strong>${escapeHtml(template.name)}</strong><span>${template.enabled ? '已启用，打卡时随机抽取' : '已停用'}</span></span>`;
+    item.innerHTML = `<img src="${template.preview || assetUrl(template.image, 'checkin-assets')}" alt="" /><span><strong>${escapeHtml(template.name)}</strong><span>${template.enabled ? '已启用，打卡时随机抽取' : '已停用'}</span></span>`;
     item.addEventListener('click', () => {
       selectedTemplateId = template.id;
       renderTemplateList();
@@ -312,7 +325,8 @@ function fillTemplate(template) {
     templateField(key, 'color').value = text.color || '#ffffff';
     templateField(key, 'bold').checked = Boolean(text.bold);
   }
-  $('#checkin-preview').src = assetUrl(template.image, 'checkin-assets');
+  $('#checkin-preview').src = template.preview || assetUrl(template.image, 'checkin-assets');
+  scheduleCheckinPreview();
 }
 
 function readTemplate() {
@@ -329,6 +343,29 @@ function readTemplate() {
   return template;
 }
 
+let checkinPreviewTimer = 0;
+
+function scheduleCheckinPreview() {
+  window.clearTimeout(checkinPreviewTimer);
+  checkinPreviewTimer = window.setTimeout(() => updateCheckinPreview(true), 350);
+}
+
+async function updateCheckinPreview(quiet = false) {
+  try {
+    const result = normalizeResponse(await apiPost('/checkin-templates/preview', readTemplate()));
+    if (!result.preview) throw new Error('后台没有返回预览图片');
+    $('#checkin-preview').src = result.preview;
+    if (!quiet) toast('已按当前文字、颜色、字号和位置生成预览');
+  } catch (error) {
+    console.error(error);
+    if (!quiet) toast(error.message || '生成预览失败');
+  }
+}
+
+$('#checkin-template-form').addEventListener('input', scheduleCheckinPreview);
+
+$('#preview-checkin-template').addEventListener('click', () => updateCheckinPreview(false));
+
 $('#new-checkin-template').addEventListener('click', () => {
   selectedTemplateId = '';
   fillTemplate(newTemplate());
@@ -341,7 +378,7 @@ $('#upload-checkin-background').addEventListener('click', async () => {
   const result = normalizeResponse(await upload('/upload-checkin-background', file));
   if (!result.image) { toast('背景上传失败'); return; }
   $('#checkin-template-form').elements.image.value = result.image;
-  $('#checkin-preview').src = assetUrl(result.image, 'checkin-assets');
+  await updateCheckinPreview(true);
   toast('背景已上传；文字位置可在下方逐项调整');
 });
 
@@ -357,7 +394,7 @@ $('#save-checkin-template').addEventListener('click', async () => {
 $('#delete-checkin-template').addEventListener('click', async () => {
   const id = $('#checkin-template-form').elements.id.value.trim();
   if (!id || !window.confirm(`确定删除打卡模板 ${id}？`)) return;
-  await apiDelete(`/checkin-templates/${encodeURIComponent(id)}`);
+  await apiDelete(`/checkin-templates/${id}`);
   selectedTemplateId = '';
   toast('已删除打卡模板');
   await loadAll();
@@ -372,5 +409,10 @@ async function boot() {
 
 boot().catch((error) => {
   console.error(error);
-  toast('加载失败，请查看控制台');
+  toast(error.message || '加载失败，请查看控制台');
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error(event.reason);
+  toast(event.reason?.message || '操作失败，请查看控制台');
 });

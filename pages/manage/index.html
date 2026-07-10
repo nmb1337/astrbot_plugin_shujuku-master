@@ -147,7 +147,7 @@
               <label>模板名称<input name="name" placeholder="蓝时咖啡打卡" /></label>
               <label>背景文件<input name="image" placeholder="checkin_xxx.jpg" /></label>
               <label class="checkline"><input name="enabled" type="checkbox" checked />启用（启用的模板会在打卡时随机使用）</label>
-              <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{tickets}</code>、<code>{date}</code>。X/Y 为相对位置（0–1），字号为图片宽度比例。</div>
+              <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{tickets}</code>、<code>{date}</code>。X/Y 为相对位置（0–1），字号为图片宽度比例；把文本留空即可隐藏该项。</div>
               <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 颜色 / 加粗</div>
               <div class="wide text-row"><strong>标题</strong><input name="title-text" /><input name="title-x" type="number" min="0" max="1" step="0.01" /><input name="title-y" type="number" min="0" max="1" step="0.01" /><input name="title-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="title-color" type="color" /><input name="title-bold" type="checkbox" /></div>
               <div class="wide text-row"><strong>奖励</strong><input name="reward-text" /><input name="reward-x" type="number" min="0" max="1" step="0.01" /><input name="reward-y" type="number" min="0" max="1" step="0.01" /><input name="reward-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="reward-color" type="color" /><input name="reward-bold" type="checkbox" /></div>
@@ -155,8 +155,8 @@
               <div class="wide text-row"><strong>入场券</strong><input name="tickets-text" /><input name="tickets-x" type="number" min="0" max="1" step="0.01" /><input name="tickets-y" type="number" min="0" max="1" step="0.01" /><input name="tickets-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="tickets-color" type="color" /><input name="tickets-bold" type="checkbox" /></div>
               <div class="wide text-row"><strong>概率</strong><input name="probability-text" /><input name="probability-x" type="number" min="0" max="1" step="0.01" /><input name="probability-y" type="number" min="0" max="1" step="0.01" /><input name="probability-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="probability-color" type="color" /><input name="probability-bold" type="checkbox" /></div>
             </form>
-            <div class="upload-row"><input id="checkin-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /><button id="upload-checkin-background">上传背景</button><button id="save-checkin-template">保存模板</button><button id="delete-checkin-template" class="danger">删除模板</button></div>
-            <img id="checkin-preview" class="checkin-preview" alt="打卡背景预览" />
+            <div class="upload-row"><input id="checkin-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /><button id="upload-checkin-background">上传背景</button><button id="preview-checkin-template" class="secondary">生成效果预览</button><button id="save-checkin-template">保存模板</button><button id="delete-checkin-template" class="danger">删除模板</button></div>
+            <img id="checkin-preview" class="checkin-preview" alt="打卡成品预览" />
           </div>
         </div>
       </section>
