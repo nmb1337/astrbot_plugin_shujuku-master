@@ -507,7 +507,7 @@ class JubenNpcPlugin(Star):
             )
 
         async def save_character():
-            data = await request.json()
+            data = await request.get_json()
             data = data or {}
             character = self._normalize_character(data)
             exists = False
@@ -546,7 +546,7 @@ class JubenNpcPlugin(Star):
             return jsonify({"checkin_templates": self.checkin_templates})
 
         async def save_checkin_template():
-            data = (await request.json()) or {}
+            data = (await request.get_json()) or {}
             template = self._normalize_checkin_template(data)
             for index, item in enumerate(self.checkin_templates):
                 if item["id"] == template["id"]:
@@ -574,7 +574,7 @@ class JubenNpcPlugin(Star):
             return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
 
         async def grant_character():
-            data = await request.json()
+            data = await request.get_json()
             data = data or {}
             scope_id = str(data.get("scope_id", "")).strip()
             user_id = str(data.get("user_id", "")).strip()
