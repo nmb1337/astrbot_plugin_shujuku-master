@@ -4,6 +4,8 @@ const $ = (selector) => document.querySelector(selector);
 let characters = [];
 let players = [];
 let selectedId = '';
+let checkinTemplates = [];
+let selectedTemplateId = '';
 
 const bridge = () => window.AstrBotPluginPage || {};
 
@@ -45,11 +47,11 @@ async function upload(path, file) {
   return fetch(`/api/v1/plugins/extensions/${PLUGIN}${path}`, { method: 'POST', body: form }).then((res) => res.json());
 }
 
-function assetUrl(image) {
+function assetUrl(image, kind = 'assets') {
   if (!image) return '';
   const api = bridge();
-  if (api.getApiUrl) return api.getApiUrl(`assets/${encodeURIComponent(image)}`);
-  return `/api/v1/plugins/extensions/${PLUGIN}/assets/${encodeURIComponent(image)}`;
+  if (api.getApiUrl) return api.getApiUrl(`${kind}/${encodeURIComponent(image)}`);
+  return `/api/v1/plugins/extensions/${PLUGIN}/${kind}/${encodeURIComponent(image)}`;
 }
 
 function toast(message) {
@@ -68,11 +70,15 @@ async function loadAll() {
   const payload = normalizeResponse(await apiGet('/characters'));
   characters = payload.characters || [];
   players = payload.players || [];
+  checkinTemplates = payload.checkin_templates || [];
   if (!selectedId && characters[0]) selectedId = characters[0].id;
+  if (!selectedTemplateId && checkinTemplates[0]) selectedTemplateId = checkinTemplates[0].id;
   renderList();
   renderPlayerOptions();
   renderGrantCharacters();
   fillForm(characters.find((item) => item.id === selectedId) || characters[0]);
+  renderTemplateList();
+  fillTemplate(checkinTemplates.find((item) => item.id === selectedTemplateId) || checkinTemplates[0]);
 }
 
 function renderList() {
@@ -128,24 +134,24 @@ function fillForm(character) {
   }
 
   selectedId = character.id;
-  form.id.value = character.id || '';
-  form.name.value = character.name || '';
-  form.base.value = character.base || '';
-  form.skin.value = character.skin || '';
-  form.star.value = character.star || 'R';
-  form.route.value = character.route || '';
-  form.bonus.value = character.bonus || '';
-  form.intro.value = character.intro || '';
-  form.image.value = character.image || '';
-  form.featured.checked = Boolean(character.featured);
+  form.elements.id.value = character.id || '';
+  form.elements.name.value = character.name || '';
+  form.elements.base.value = character.base || '';
+  form.elements.skin.value = character.skin || '';
+  form.elements.star.value = character.star || 'R';
+  form.elements.route.value = character.route || '';
+  form.elements.bonus.value = character.bonus || '';
+  form.elements.intro.value = character.intro || '';
+  form.elements.image.value = character.image || '';
+  form.elements.featured.checked = Boolean(character.featured);
   const colors = character.colors || ['#6c8cff', '#f4d35e', '#10172a'];
   form.color0.value = colors[0] || '#6c8cff';
   form.color1.value = colors[1] || '#f4d35e';
   form.color2.value = colors[2] || '#10172a';
   const skills = character.skills || [];
   [0, 1, 2].forEach((index) => {
-    form[`skill${index}`].value = skills[index]?.[0] || '';
-    form[`skill${index}Desc`].value = skills[index]?.[1] || '';
+    form.elements[`skill${index}`].value = skills[index]?.[0] || '';
+    form.elements[`skill${index}Desc`].value = skills[index]?.[1] || '';
   });
 
   $('#preview-image').src = assetUrl(character.image);
@@ -156,21 +162,21 @@ function fillForm(character) {
 function readForm() {
   const form = $('#character-form');
   return {
-    id: form.id.value.trim(),
-    name: form.name.value.trim(),
-    base: form.base.value.trim(),
-    skin: form.skin.value.trim(),
-    star: form.star.value,
-    route: form.route.value.trim(),
-    bonus: form.bonus.value.trim(),
-    intro: form.intro.value.trim(),
-    image: form.image.value.trim(),
-    featured: form.featured.checked,
-    colors: [form.color0.value, form.color1.value, form.color2.value],
+    id: form.elements.id.value.trim(),
+    name: form.elements.name.value.trim(),
+    base: form.elements.base.value.trim(),
+    skin: form.elements.skin.value.trim(),
+    star: form.elements.star.value,
+    route: form.elements.route.value.trim(),
+    bonus: form.elements.bonus.value.trim(),
+    intro: form.elements.intro.value.trim(),
+    image: form.elements.image.value.trim(),
+    featured: form.elements.featured.checked,
+    colors: [form.elements.color0.value, form.elements.color1.value, form.elements.color2.value],
     skills: [
-      [form.skill0.value.trim(), form.skill0Desc.value.trim()],
-      [form.skill1.value.trim(), form.skill1Desc.value.trim()],
-      [form.skill2.value.trim(), form.skill2Desc.value.trim()],
+      [form.elements.skill0.value.trim(), form.elements.skill0Desc.value.trim()],
+      [form.elements.skill1.value.trim(), form.elements.skill1Desc.value.trim()],
+      [form.elements.skill2.value.trim(), form.elements.skill2Desc.value.trim()],
     ],
   };
 }
@@ -189,10 +195,10 @@ $('#refresh').addEventListener('click', loadAll);
 $('#new-character').addEventListener('click', () => {
   selectedId = '';
   $('#character-form').reset();
-  $('#character-form').star.value = 'SR';
-  $('#character-form').color0.value = '#6c8cff';
-  $('#character-form').color1.value = '#f4d35e';
-  $('#character-form').color2.value = '#10172a';
+  $('#character-form').elements.star.value = 'SR';
+  $('#character-form').elements.color0.value = '#6c8cff';
+  $('#character-form').elements.color1.value = '#f4d35e';
+  $('#character-form').elements.color2.value = '#10172a';
   $('#preview-image').removeAttribute('src');
   $('#preview-title').textContent = '新增角色';
   $('#preview-subtitle').textContent = '填写信息并上传图片。';
@@ -214,7 +220,7 @@ $('#save-button').addEventListener('click', async () => {
 });
 
 $('#delete-button').addEventListener('click', async () => {
-  const id = $('#character-form').id.value.trim();
+  const id = $('#character-form').elements.id.value.trim();
   if (!id) return;
   if (!window.confirm(`确定删除 ${id}？玩家已有数据不会自动删除。`)) return;
   await apiDelete(`/characters/${encodeURIComponent(id)}`);
@@ -234,7 +240,7 @@ $('#upload-button').addEventListener('click', async () => {
     toast('上传失败');
     return;
   }
-  $('#character-form').image.value = result.image;
+  $('#character-form').elements.image.value = result.image;
   $('#preview-image').src = assetUrl(result.image);
   toast('图片已上传');
 });
@@ -260,6 +266,107 @@ $('#grant-button').addEventListener('click', async () => {
   }
   const result = normalizeResponse(await apiPost('/grant', payload));
   toast(result.created ? '已赠送角色' : '玩家已拥有该角色');
+  await loadAll();
+});
+
+function templateField(key, field) {
+  return $(`#checkin-template-form [name="${key}-${field}"]`);
+}
+
+function newTemplate() {
+  return {
+    id: '', name: '', image: '', enabled: true,
+    texts: {
+      title: { text: '{title}', x: 0.07, y: 0.10, size: 0.075, color: '#ffffff', bold: true },
+      reward: { text: '{reward}', x: 0.08, y: 0.30, size: 0.045, color: '#ffffff', bold: false },
+      coins: { text: '当前星币：{coins}', x: 0.08, y: 0.40, size: 0.045, color: '#ffffff', bold: false },
+      tickets: { text: '免费入场券：{tickets}', x: 0.08, y: 0.50, size: 0.045, color: '#ffffff', bold: false },
+      probability: { text: '概率：1星币45% / 2星币30% / 3星币20% / 入场券5%', x: 0.08, y: 0.82, size: 0.030, color: '#ffffff', bold: false },
+    },
+  };
+}
+
+function renderTemplateList() {
+  const list = $('#checkin-template-list');
+  list.innerHTML = '';
+  checkinTemplates.forEach((template) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = `character-item ${template.id === selectedTemplateId ? 'active' : ''}`;
+    item.innerHTML = `<img src="${assetUrl(template.image, 'checkin-assets')}" alt="" /><span><strong>${escapeHtml(template.name)}</strong><span>${template.enabled ? '已启用，打卡时随机抽取' : '已停用'}</span></span>`;
+    item.addEventListener('click', () => {
+      selectedTemplateId = template.id;
+      renderTemplateList();
+      fillTemplate(template);
+    });
+    list.appendChild(item);
+  });
+}
+
+function fillTemplate(template) {
+  const form = $('#checkin-template-form');
+  if (!template) { form.reset(); return; }
+  form.elements.id.value = template.id || '';
+  form.elements.name.value = template.name || '';
+  form.elements.image.value = template.image || '';
+  form.elements.enabled.checked = Boolean(template.enabled);
+  for (const key of ['title', 'reward', 'coins', 'tickets', 'probability']) {
+    const text = template.texts?.[key] || {};
+    templateField(key, 'text').value = text.text || '';
+    templateField(key, 'x').value = text.x ?? 0;
+    templateField(key, 'y').value = text.y ?? 0;
+    templateField(key, 'size').value = text.size ?? 0.04;
+    templateField(key, 'color').value = text.color || '#ffffff';
+    templateField(key, 'bold').checked = Boolean(text.bold);
+  }
+  $('#checkin-preview').src = assetUrl(template.image, 'checkin-assets');
+}
+
+function readTemplate() {
+  const form = $('#checkin-template-form');
+  const template = { id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), image: form.elements.image.value.trim(), enabled: form.elements.enabled.checked, texts: {} };
+  for (const key of ['title', 'reward', 'coins', 'tickets', 'probability']) {
+    template.texts[key] = {
+      text: templateField(key, 'text').value.trim(),
+      x: Number(templateField(key, 'x').value), y: Number(templateField(key, 'y').value),
+      size: Number(templateField(key, 'size').value), color: templateField(key, 'color').value,
+      bold: templateField(key, 'bold').checked,
+    };
+  }
+  return template;
+}
+
+$('#new-checkin-template').addEventListener('click', () => {
+  selectedTemplateId = '';
+  fillTemplate(newTemplate());
+  renderTemplateList();
+});
+
+$('#upload-checkin-background').addEventListener('click', async () => {
+  const file = $('#checkin-background-upload').files[0];
+  if (!file) { toast('请选择背景图片'); return; }
+  const result = normalizeResponse(await upload('/upload-checkin-background', file));
+  if (!result.image) { toast('背景上传失败'); return; }
+  $('#checkin-template-form').elements.image.value = result.image;
+  $('#checkin-preview').src = assetUrl(result.image, 'checkin-assets');
+  toast('背景已上传；文字位置可在下方逐项调整');
+});
+
+$('#save-checkin-template').addEventListener('click', async () => {
+  const template = readTemplate();
+  if (!template.id || !template.name) { toast('模板 ID 和名称必填'); return; }
+  const result = normalizeResponse(await apiPost('/checkin-templates', template));
+  selectedTemplateId = result.template?.id || template.id;
+  toast('已保存打卡模板');
+  await loadAll();
+});
+
+$('#delete-checkin-template').addEventListener('click', async () => {
+  const id = $('#checkin-template-form').elements.id.value.trim();
+  if (!id || !window.confirm(`确定删除打卡模板 ${id}？`)) return;
+  await apiDelete(`/checkin-templates/${encodeURIComponent(id)}`);
+  selectedTemplateId = '';
+  toast('已删除打卡模板');
   await loadAll();
 });
 

@@ -259,12 +259,15 @@ class JubenNpcPlugin(Star):
         self.plugin_dir = Path(__file__).parent
         self.data_dir = self.plugin_dir / "data"
         self.assets_dir = self.data_dir / "npc_assets"
+        self.checkin_assets_dir = self.data_dir / "checkin_assets"
         self.font_dir = self.data_dir / "fonts"
         self.render_dir = self.data_dir / "rendered"
         self.db_path = self.data_dir / "players.json"
         self.characters_path = self.data_dir / "characters.json"
+        self.checkin_templates_path = self.data_dir / "checkin_templates.json"
         self.db: Dict[str, Any] = {"scopes": {}}
         self.characters: List[Dict[str, Any]] = []
+        self.checkin_templates: List[Dict[str, Any]] = []
         self._font_cache: Dict[Tuple[int, bool], ImageFont.FreeTypeFont] = {}
         self._warned_missing_font = False
         self._register_page_apis(context)
@@ -272,10 +275,12 @@ class JubenNpcPlugin(Star):
     async def initialize(self):
         self.data_dir.mkdir(exist_ok=True)
         self.assets_dir.mkdir(exist_ok=True)
+        self.checkin_assets_dir.mkdir(exist_ok=True)
         self.font_dir.mkdir(exist_ok=True)
         self.render_dir.mkdir(exist_ok=True)
         self._load_db()
         self._load_characters()
+        self._load_checkin_templates()
         self._ensure_fonts()
         self._ensure_assets()
         logger.info("剧本杀 NPC 数据库插件已加载。")
@@ -283,6 +288,7 @@ class JubenNpcPlugin(Star):
     async def terminate(self):
         self._save_db()
         self._save_characters()
+        self._save_checkin_templates()
 
     @filter.command("剧本杀帮助", alias={"npc帮助", "NPC帮助"})
     async def help_cmd(self, event: AstrMessageEvent):
@@ -390,11 +396,7 @@ class JubenNpcPlugin(Star):
         player = self._get_player(event)
         today = datetime.now().strftime("%Y-%m-%d")
         if player.get("last_checkin") == today:
-            path = self._render_text_card(
-                "今日已打卡",
-                [f"日期：{today}", f"星币：{player['coins']}", f"免费入场券：{player['tickets']}"],
-                subtitle="明天再来，档案室会刷新新的补给。",
-            )
+            path = self._render_checkin_card(player, "今日已打卡", "已领取", today=today)
             yield event.image_result(str(path))
             return
 
@@ -406,11 +408,7 @@ class JubenNpcPlugin(Star):
         player["last_checkin"] = today
         self._save_db()
 
-        path = self._render_text_card(
-            "打卡成功",
-            [f"获得：{amount} {reward_type}", f"当前星币：{player['coins']}", f"免费入场券：{player['tickets']}"],
-            subtitle="概率：1星币45% / 2星币30% / 3星币20% / 入场券5%",
-        )
+        path = self._render_checkin_card(player, "打卡成功", f"获得：{amount} {reward_type}")
         yield event.image_result(str(path))
 
     @filter.command("状态栏", alias={"角色状态", "我的角色"})
@@ -518,6 +516,7 @@ class JubenNpcPlugin(Star):
                 {
                     "characters": self.characters,
                     "players": self._known_players(),
+                    "checkin_templates": self.checkin_templates,
                 }
             )
 
@@ -557,6 +556,37 @@ class JubenNpcPlugin(Star):
             saved_name = await self._save_uploaded_image(file)
             return json_response({"ok": True, "image": saved_name, "url": f"assets/{saved_name}"})
 
+        async def list_checkin_templates():
+            return json_response({"checkin_templates": self.checkin_templates})
+
+        async def save_checkin_template():
+            data = (await request.json()) or {}
+            template = self._normalize_checkin_template(data)
+            for index, item in enumerate(self.checkin_templates):
+                if item["id"] == template["id"]:
+                    self.checkin_templates[index] = template
+                    break
+            else:
+                self.checkin_templates.append(template)
+            self._save_checkin_templates()
+            return json_response({"ok": True, "template": template})
+
+        async def delete_checkin_template(template_id: str):
+            before = len(self.checkin_templates)
+            self.checkin_templates = [item for item in self.checkin_templates if item["id"] != template_id]
+            if not self.checkin_templates:
+                self.checkin_templates = [self._default_checkin_template()]
+            self._save_checkin_templates()
+            return json_response({"ok": True, "deleted": before != len(self.checkin_templates)})
+
+        async def upload_checkin_background():
+            files = await request.files()
+            file = files.get("file") if hasattr(files, "get") else (files[0] if files else None)
+            if file is None:
+                return error_response("没有收到背景图片文件。", 400)
+            saved_name = await self._save_uploaded_image(file, self.checkin_assets_dir, "checkin")
+            return json_response({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
+
         async def grant_character():
             data = await request.json()
             data = data or {}
@@ -578,12 +608,23 @@ class JubenNpcPlugin(Star):
                 return error_response("图片不存在。", 404)
             return file_response(str(path))
 
+        async def get_checkin_asset(filename: str):
+            path = self.checkin_assets_dir / Path(filename).name
+            if not path.exists():
+                return error_response("背景图片不存在。", 404)
+            return file_response(str(path))
+
         context.register_web_api(f"/{PLUGIN_NAME}/characters", list_characters, ["GET"], "List NPC characters")
         context.register_web_api(f"/{PLUGIN_NAME}/characters", save_character, ["POST"], "Save NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/characters/<character_id>", delete_character, ["DELETE"], "Delete NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-image", upload_image, ["POST"], "Upload NPC image")
+        context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates", list_checkin_templates, ["GET"], "List check-in templates")
+        context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates", save_checkin_template, ["POST"], "Save check-in template")
+        context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/<template_id>", delete_checkin_template, ["DELETE"], "Delete check-in template")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-background", upload_checkin_background, ["POST"], "Upload check-in background")
         context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/assets/<filename>", get_asset, ["GET"], "Get NPC image")
+        context.register_web_api(f"/{PLUGIN_NAME}/checkin-assets/<filename>", get_checkin_asset, ["GET"], "Get check-in background")
 
     def _load_db(self):
         if not self.db_path.exists():
@@ -617,6 +658,68 @@ class JubenNpcPlugin(Star):
             if item["id"] not in known_ids:
                 self.characters.append(self._normalize_character(item))
         self._save_characters()
+
+    def _default_checkin_template(self) -> Dict[str, Any]:
+        return {
+            "id": "default",
+            "name": "默认打卡样式",
+            "image": "",
+            "enabled": True,
+            "texts": {
+                "title": {"text": "{title}", "x": 0.07, "y": 0.10, "size": 0.075, "color": "#172033", "bold": True},
+                "reward": {"text": "{reward}", "x": 0.08, "y": 0.30, "size": 0.045, "color": "#243044", "bold": False},
+                "coins": {"text": "当前星币：{coins}", "x": 0.08, "y": 0.40, "size": 0.045, "color": "#243044", "bold": False},
+                "tickets": {"text": "免费入场券：{tickets}", "x": 0.08, "y": 0.50, "size": 0.045, "color": "#243044", "bold": False},
+                "probability": {"text": "概率：1星币45% / 2星币30% / 3星币20% / 入场券5%", "x": 0.08, "y": 0.82, "size": 0.030, "color": "#657086", "bold": False},
+            },
+        }
+
+    def _load_checkin_templates(self):
+        if not self.checkin_templates_path.exists():
+            self.checkin_templates = [self._default_checkin_template()]
+            self._save_checkin_templates()
+            return
+        try:
+            raw = json.loads(self.checkin_templates_path.read_text(encoding="utf-8"))
+            templates = raw.get("templates", raw) if isinstance(raw, dict) else raw
+            self.checkin_templates = [self._normalize_checkin_template(item) for item in templates if isinstance(item, dict)]
+        except Exception as exc:
+            logger.error(f"读取打卡模板失败，将使用默认样式：{exc}")
+            self.checkin_templates = []
+        if not self.checkin_templates:
+            self.checkin_templates = [self._default_checkin_template()]
+        self._save_checkin_templates()
+
+    def _save_checkin_templates(self):
+        self.checkin_templates_path.write_text(
+            json.dumps({"templates": self.checkin_templates}, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def _normalize_checkin_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        base = self._default_checkin_template()
+        template_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(data.get("id") or "").strip()).strip("_")
+        base["id"] = template_id or f"checkin_{int(datetime.now().timestamp())}"
+        base["name"] = str(data.get("name") or base["name"]).strip()[:60]
+        base["image"] = Path(str(data.get("image") or "")).name
+        base["enabled"] = bool(data.get("enabled", True))
+        raw_texts = data.get("texts") if isinstance(data.get("texts"), dict) else {}
+        for key, defaults in base["texts"].items():
+            source = raw_texts.get(key) if isinstance(raw_texts.get(key), dict) else {}
+            defaults["text"] = str(source.get("text") or defaults["text"])[:180]
+            defaults["x"] = self._template_number(source.get("x"), defaults["x"], 0, 1)
+            defaults["y"] = self._template_number(source.get("y"), defaults["y"], 0, 1)
+            defaults["size"] = self._template_number(source.get("size"), defaults["size"], 0.015, 0.15)
+            color = str(source.get("color") or defaults["color"])
+            defaults["color"] = color if re.fullmatch(r"#[0-9a-fA-F]{6}", color) else defaults["color"]
+            defaults["bold"] = bool(source.get("bold", defaults["bold"]))
+        return base
+
+    @staticmethod
+    def _template_number(value: Any, default: float, minimum: float, maximum: float) -> float:
+        try:
+            return max(minimum, min(maximum, float(value)))
+        except (TypeError, ValueError):
+            return default
 
     def _save_characters(self):
         self.data_dir.mkdir(exist_ok=True)
@@ -918,13 +1021,14 @@ class JubenNpcPlugin(Star):
         value = re.sub(r"[^a-z0-9_\-\u4e00-\u9fff]", "", value)
         return value or f"character_{int(datetime.now().timestamp())}"
 
-    async def _save_uploaded_image(self, upload: Any) -> str:
+    async def _save_uploaded_image(self, upload: Any, destination: Optional[Path] = None, prefix: str = "custom") -> str:
         raw_name = Path(getattr(upload, "filename", "") or "character.png").name
         suffix = Path(raw_name).suffix.lower()
         if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
             suffix = ".png"
-        saved_name = f"custom_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}{suffix}"
-        dest = self.assets_dir / saved_name
+        saved_name = f"{prefix}_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}{suffix}"
+        dest = (destination or self.assets_dir) / saved_name
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if hasattr(upload, "save"):
             result = upload.save(str(dest))
             if inspect.isawaitable(result):
@@ -1092,6 +1196,51 @@ class JubenNpcPlugin(Star):
                 y += 32
         img.save(path)
         return path
+
+    def _render_checkin_card(self, player: Dict[str, Any], title: str, reward: str, today: str = "") -> Path:
+        """Render a full-bleed 16:9 check-in card using a template's own text layout."""
+        enabled = [item for item in self.checkin_templates if item.get("enabled")]
+        template = random.choice(enabled or self.checkin_templates or [self._default_checkin_template()])
+        size = (1280, 720)
+        image_name = str(template.get("image") or "")
+        background_path = self.checkin_assets_dir / Path(image_name).name
+        if image_name and background_path.exists():
+            img = self._cover_image(background_path, size)
+        else:
+            img = self._gradient(size, "#18243c", "#2f6b6d").convert("RGBA")
+
+        draw = ImageDraw.Draw(img)
+        values = {
+            "title": title,
+            "reward": reward,
+            "coins": player.get("coins", 0),
+            "tickets": player.get("tickets", 0),
+            "date": today or datetime.now().strftime("%Y-%m-%d"),
+        }
+        for item in template.get("texts", {}).values():
+            text = str(item.get("text") or "").format(**values)
+            if not text:
+                continue
+            font_size = max(14, int(float(item.get("size", 0.04)) * size[0]))
+            font = self._font(font_size, bool(item.get("bold")))
+            x = int(float(item.get("x", 0)) * size[0])
+            y = int(float(item.get("y", 0)) * size[1])
+            color = item.get("color", "#ffffff")
+            # A small shadow keeps text readable on user-supplied art without adding borders or panels.
+            draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 130))
+            draw.text((x, y), text, font=font, fill=color)
+        path = self.render_dir / f"checkin_{player['user_id']}_{datetime.now().timestamp()}.png"
+        img.save(path)
+        return path
+
+    @staticmethod
+    def _cover_image(path: Path, size: Tuple[int, int]) -> Image.Image:
+        source = Image.open(path).convert("RGBA")
+        scale = max(size[0] / source.width, size[1] / source.height)
+        resized = source.resize((round(source.width * scale), round(source.height * scale)), Image.Resampling.LANCZOS)
+        left = max(0, (resized.width - size[0]) // 2)
+        top = max(0, (resized.height - size[1]) // 2)
+        return resized.crop((left, top, left + size[0], top + size[1]))
 
     def _render_status(self, player: Dict[str, Any], character: Dict[str, Any], banner: str = "") -> Path:
         path = self.render_dir / f"status_{player['user_id']}_{character['id']}.png"

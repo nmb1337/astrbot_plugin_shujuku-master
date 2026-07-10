@@ -1,0 +1,69 @@
+{
+  "templates": [
+    {
+      "id": "blue_hour_cafe",
+      "name": "蓝时咖啡",
+      "image": "blue_hour_cafe.jpg",
+      "enabled": true,
+      "texts": {
+        "title": {"text": "{title}", "x": 0.07, "y": 0.12, "size": 0.06, "color": "#283d62", "bold": true},
+        "reward": {"text": "{reward}", "x": 0.07, "y": 0.29, "size": 0.035, "color": "#283d62", "bold": false},
+        "coins": {"text": "当前星币：{coins}", "x": 0.07, "y": 0.38, "size": 0.035, "color": "#283d62", "bold": false},
+        "tickets": {"text": "免费入场券：{tickets}", "x": 0.07, "y": 0.47, "size": 0.035, "color": "#283d62", "bold": false},
+        "probability": {"text": "概率：1星币45% / 2星币30% / 3星币20% / 入场券5%", "x": 0.06, "y": 0.86, "size": 0.024, "color": "#4b6485", "bold": false}
+      }
+    },
+    {
+      "id": "noble_afternoon",
+      "name": "贵族午后",
+      "image": "noble_afternoon.jpg",
+      "enabled": true,
+      "texts": {
+        "title": {"text": "{title}", "x": 0.68, "y": 0.09, "size": 0.055, "color": "#6e4d26", "bold": true},
+        "reward": {"text": "{reward}", "x": 0.69, "y": 0.24, "size": 0.032, "color": "#6e4d26", "bold": false},
+        "coins": {"text": "当前星币：{coins}", "x": 0.69, "y": 0.32, "size": 0.032, "color": "#6e4d26", "bold": false},
+        "tickets": {"text": "免费入场券：{tickets}", "x": 0.69, "y": 0.40, "size": 0.032, "color": "#6e4d26", "bold": false},
+        "probability": {"text": "概率：1星币45% / 2星币30% / 3星币20% / 入场券5%", "x": 0.05, "y": 0.88, "size": 0.022, "color": "#715e4d", "bold": false}
+      }
+    },
+    {
+      "id": "cafe_lumiere",
+      "name": "红馆流明",
+      "image": "cafe_lumiere.jpg",
+      "enabled": true,
+      "texts": {
+        "title": {"text": "{title}", "x": 0.05, "y": 0.09, "size": 0.06, "color": "#f8ddd2", "bold": true},
+        "reward": {"text": "{reward}", "x": 0.06, "y": 0.25, "size": 0.033, "color": "#f8ddd2", "bold": false},
+        "coins": {"text": "当前星币：{coins}", "x": 0.06, "y": 0.33, "size": 0.033, "color": "#f8ddd2", "bold": false},
+        "tickets": {"text": "免费入场券：{tickets}", "x": 0.06, "y": 0.41, "size": 0.033, "color": "#f8ddd2", "bold": false},
+        "probability": {"text": "概率：1星币45% / 2星币30% / 3星币20% / 入场券5%", "x": 0.05, "y": 0.86, "size": 0.022, "color": "#f0c5bb", "bold": false}
+      }
+    },
+    {
+      "id": "ash_silver_blade",
+      "name": "灰堡银刃",
+      "image": "ash_silver_blade.jpg",
+      "enabled": true,
+      "texts": {
+        "title": {"text": "{title}", "x": 0.67, "y": 0.10, "size": 0.055, "color": "#1e3046", "bold": true},
+        "reward": {"text": "{reward}", "x": 0.68, "y": 0.25, "size": 0.032, "color": "#1e3046", "bold": false},
+        "coins": {"text": "当前星币：{coins}", "x": 0.68, "y": 0.33, "size": 0.032, "color": "#1e3046", "bold": false},
+        "tickets": {"text": "免费入场券：{tickets}", "x": 0.68, "y": 0.41, "size": 0.032, "color": "#1e3046", "bold": false},
+        "probability": {"text": "概率：1星币45% / 2星币30% / 3星币20% / 入场券5%", "x": 0.06, "y": 0.88, "size": 0.022, "color": "#31455a", "bold": false}
+      }
+    },
+    {
+      "id": "blue_cafe_morning",
+      "name": "蓝咖啡晨光",
+      "image": "blue_cafe_morning.jpg",
+      "enabled": true,
+      "texts": {
+        "title": {"text": "{title}", "x": 0.08, "y": 0.14, "size": 0.06, "color": "#4b648c", "bold": true},
+        "reward": {"text": "{reward}", "x": 0.08, "y": 0.31, "size": 0.034, "color": "#4b648c", "bold": false},
+        "coins": {"text": "当前星币：{coins}", "x": 0.08, "y": 0.39, "size": 0.034, "color": "#4b648c", "bold": false},
+        "tickets": {"text": "免费入场券：{tickets}", "x": 0.08, "y": 0.47, "size": 0.034, "color": "#4b648c", "bold": false},
+        "probability": {"text": "概率：1星币45% / 2星币30% / 3星币20% / 入场券5%", "x": 0.06, "y": 0.86, "size": 0.022, "color": "#587192", "bold": false}
+      }
+    }
+  ]
+}

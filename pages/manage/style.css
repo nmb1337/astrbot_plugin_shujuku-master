@@ -226,6 +226,68 @@ textarea {
   margin-top: 18px;
 }
 
+.checkin-panel {
+  margin-top: 18px;
+}
+
+.checkin-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  padding: 16px;
+}
+
+.checkin-layout .character-list {
+  max-height: 540px;
+  padding: 0;
+}
+
+.template-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.template-help {
+  color: #607086;
+  font-size: 13px;
+}
+
+.text-table-head,
+.text-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 54px minmax(160px, 1fr) 70px 70px 70px 54px 40px;
+}
+
+.text-table-head {
+  color: #607086;
+  font-size: 12px;
+}
+
+.text-row input[type="checkbox"] {
+  min-height: auto;
+  width: auto;
+}
+
+.text-row input[type="color"] {
+  min-height: 36px;
+  padding: 3px;
+}
+
+.checkin-preview {
+  aspect-ratio: 16 / 9;
+  background: #edf2f7;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  display: block;
+  margin: 0 16px 16px;
+  max-width: calc(100% - 32px);
+  object-fit: cover;
+  width: 640px;
+}
+
 .grant-grid {
   align-items: end;
   grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr auto;
@@ -252,8 +314,16 @@ textarea {
 @media (max-width: 960px) {
   .layout,
   .form-grid,
-  .grant-grid {
+  .grant-grid,
+  .checkin-layout,
+  .template-form {
     grid-template-columns: 1fr;
+  }
+
+  .text-table-head,
+  .text-row {
+    grid-template-columns: 48px 1fr repeat(3, 62px) 50px 36px;
+    overflow-x: auto;
   }
 
   .preview {
