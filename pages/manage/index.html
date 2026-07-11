@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>剧本杀 NPC 运营面板</title>
+    <title>剧本杀同伴运营面板</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
-          <h1>剧本杀 NPC 运营面板</h1>
-          <p>新增角色、上传皮肤图片、修改奖池信息，并把指定角色发给玩家。</p>
+          <h1>同伴、皮肤与道具运营面板</h1>
+          <p>上传内容保存在插件本地数据目录，不需要图床；可选择文件、拖放或直接粘贴图片。</p>
         </div>
         <button id="refresh" class="secondary">刷新</button>
       </header>
@@ -19,178 +19,94 @@
       <section class="layout">
         <aside class="panel list-panel">
           <div class="panel-head">
-            <h2>角色与皮肤</h2>
-            <button id="new-character">新增</button>
+            <h2>总库</h2>
+            <button id="new-character">新增条目</button>
+          </div>
+          <div class="type-filter" role="tablist">
+            <button data-filter="all" class="active">全部</button>
+            <button data-filter="companion">同伴</button>
+            <button data-filter="skin">皮肤</button>
+            <button data-filter="item">道具</button>
           </div>
           <div id="character-list" class="character-list"></div>
         </aside>
 
         <section class="panel editor-panel">
           <div class="panel-head">
-            <h2>编辑角色</h2>
+            <h2>编辑条目</h2>
             <span id="save-state"></span>
           </div>
-
           <form id="character-form" class="form-grid">
-            <label>
-              ID
-              <input name="id" required placeholder="blue_hour_cafe" />
+            <label>条目类型
+              <select name="kind"><option value="companion">同伴</option><option value="skin">皮肤</option><option value="item">道具</option></select>
             </label>
-            <label>
-              名称
-              <input name="name" required placeholder="蓝时咖啡" />
-            </label>
-            <label>
-              本体/系列
-              <input name="base" placeholder="蓝时咖啡" />
-            </label>
-            <label>
-              皮肤名
-              <input name="skin" placeholder="Winter Issue" />
-            </label>
-            <label>
-              稀有度
-              <select name="star">
-                <option>SSR</option>
-                <option>SR</option>
-                <option>R</option>
-              </select>
-            </label>
-            <label>
-              主色
-              <input name="color0" type="color" value="#6c8cff" />
-            </label>
-            <label>
-              辅色
-              <input name="color1" type="color" value="#f4d35e" />
-            </label>
-            <label>
-              背景色
-              <input name="color2" type="color" value="#10172a" />
-            </label>
-            <label class="wide">
-              获取途径
-              <input name="route" placeholder="运营后台添加 / 月度皮肤池" />
-            </label>
-            <label class="wide">
-              经验加成
-              <input name="bonus" placeholder="推理经验 +10%" />
-            </label>
-            <label class="wide">
-              介绍
-              <textarea name="intro" rows="3"></textarea>
-            </label>
-            <label>
-              2星技能名
-              <input name="skill0" />
-            </label>
-            <label>
-              2星技能描述
-              <input name="skill0Desc" />
-            </label>
-            <label>
-              3星技能名
-              <input name="skill1" />
-            </label>
-            <label>
-              3星技能描述
-              <input name="skill1Desc" />
-            </label>
-            <label>
-              5星技能名
-              <input name="skill2" />
-            </label>
-            <label>
-              5星技能描述
-              <input name="skill2Desc" />
-            </label>
-            <label>
-              图片文件
-              <input name="image" placeholder="blue_hour_cafe.png" />
-            </label>
-            <label class="checkline">
-              <input name="featured" type="checkbox" />
-              加入月度大奖候选
-            </label>
+            <label>ID<input name="id" required placeholder="linger" /></label>
+            <label>中文名称<input name="name" required placeholder="灵儿" /></label>
+            <label>英文名 / 副标题<input name="english_name" placeholder="Blue Predator" /></label>
+            <label>品质<input name="quality" placeholder="SSR / 普通 / 中级 / 高级" /></label>
+            <label class="skin-only">所属同伴<select name="parent_id" id="parent-companion"></select></label>
+            <label class="companion-only">专属物品名称<input name="exclusive_item" placeholder="灵儿的信物" /></label>
+            <label>图片文件<input name="image" placeholder="上传后自动填入" /></label>
+            <label>画面焦点 X<input name="focal_x" type="number" min="0" max="1" step="0.01" value="0.5" /></label>
+            <label>画面焦点 Y<input name="focal_y" type="number" min="0" max="1" step="0.01" value="0.5" /></label>
+            <label class="checkline"><input name="in_pool" type="checkbox" />加入本期奖池（同伴、皮肤每类仅保留一个；道具可多选）</label>
+            <label class="companion-only wide">获取途径<input name="route" placeholder="运营后台添加 / 活动" /></label>
+            <label class="companion-only wide">经验加成<input name="bonus" placeholder="推理经验 +10%" /></label>
+            <label class="item-only wide">道具效果<textarea name="effect" rows="2" placeholder="使用或获得后的效果"></textarea></label>
+            <input name="intro" type="hidden" />
+            <label class="companion-only">2星技能名<input name="skill0" /></label><label class="companion-only">2星技能描述<input name="skill0Desc" /></label>
+            <label class="companion-only">3星技能名<input name="skill1" /></label><label class="companion-only">3星技能描述<input name="skill1Desc" /></label>
+            <label class="companion-only">5星技能名<input name="skill2" /></label><label class="companion-only">5星技能描述<input name="skill2Desc" /></label>
           </form>
 
-          <div class="upload-row">
+          <div id="image-dropzone" class="dropzone" tabindex="0">
+            <strong>图片上传区</strong><span>选择文件、将图片拖到这里，或点击后 Ctrl+V 粘贴图片。</span>
             <input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp" />
-            <button id="upload-button">上传图片</button>
-            <button id="save-button">保存角色</button>
-            <button id="delete-button" class="danger">删除角色</button>
           </div>
-
-          <div class="preview">
-            <img id="preview-image" alt="" />
-            <div>
-              <strong id="preview-title">未选择角色</strong>
-              <p id="preview-subtitle">上传后会自动写入“图片文件”。</p>
-            </div>
-          </div>
+          <div class="upload-row"><button id="save-button">保存条目</button><button id="delete-button" class="danger">删除条目</button></div>
+          <div class="preview"><img id="preview-image" alt="" /><div><strong id="preview-title">未选择条目</strong><p id="preview-subtitle">上传图片后可通过焦点 X/Y 调整状态栏的裁切位置。</p></div></div>
         </section>
       </section>
 
+      <section class="panel visuals-panel">
+        <div class="panel-head"><div><h2>视觉色板</h2><span>同伴栏五色、状态栏三色、道具栏三色。保存后立即影响后续生成图片。</span></div><button id="save-settings">保存色板</button></div>
+        <form id="settings-form" class="color-grid">
+          <label>同伴中文名<input name="companion_name_color" type="color" /></label><label>英文名与品质<input name="companion_meta_color" type="color" /></label><label>同伴边框<input name="companion_border_color" type="color" /></label><label>专属物品字体<input name="exclusive_item_color" type="color" /></label><label>专属物品框<input name="exclusive_item_border_color" type="color" /></label>
+          <label>状态栏角色名<input name="status_name_color" type="color" /></label><label>状态栏小字与等级<input name="status_meta_color" type="color" /></label><label>状态栏白底<input name="status_panel_color" type="color" /></label>
+          <label>道具名称<input name="item_name_color" type="color" /></label><label>道具品质<input name="item_quality_color" type="color" /></label><label>道具效果<input name="item_effect_color" type="color" /></label>
+        </form>
+      </section>
+
       <section class="panel checkin-panel">
-        <div class="panel-head">
-          <div>
-            <h2>打卡背景与文字模板</h2>
-            <span>背景将以 16:9 全覆盖渲染，不留边缘；每张图可拥有独立的文字、颜色、字号与相对位置。</span>
-          </div>
-          <button id="new-checkin-template">新增模板</button>
-        </div>
+        <div class="panel-head"><div><h2>打卡背景与文字模板</h2><span>16:9 背景会无缝铺满；默认使用大同伴框和深色文字框。每张背景保有独立文字、位置、颜色与字号。</span></div><button id="new-checkin-template">新增模板</button></div>
         <div class="checkin-layout">
           <aside id="checkin-template-list" class="character-list"></aside>
           <div>
             <form id="checkin-template-form" class="template-form">
-              <label>模板 ID<input name="id" placeholder="blue_hour_checkin" /></label>
-              <label>模板名称<input name="name" placeholder="蓝时咖啡打卡" /></label>
-              <label>背景文件<input name="image" placeholder="checkin_xxx.jpg" /></label>
-              <label class="checkline"><input name="enabled" type="checkbox" checked />启用（启用的模板会在打卡时随机使用）</label>
-              <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{tickets}</code>、<code>{date}</code>。X/Y 为相对位置（0–1），字号为图片宽度比例；把文本留空即可隐藏该项。</div>
+              <label>模板 ID<input name="id" placeholder="linger_checkin" /></label><label>模板名称<input name="name" placeholder="灵儿打卡" /></label><label>背景文件<input name="image" placeholder="上传后自动填入" /></label>
+              <label>深色框颜色<input name="panel_color" type="color" value="#152238" /></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用随机打卡</label><label class="checkline"><input name="show_companion" type="checkbox" checked />显示当前同伴/皮肤大图</label>
+              <label class="wide">打卡附言（{message}）<input name="message" placeholder="今日也要和同伴一起前进。" /></label>
+              <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{message}</code>、<code>{date}</code>。复制网页图片的文字不能上传；请粘贴真实图片或拖入文件。</div>
               <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 颜色 / 加粗</div>
               <div class="wide text-row"><strong>标题</strong><input name="title-text" /><input name="title-x" type="number" min="0" max="1" step="0.01" /><input name="title-y" type="number" min="0" max="1" step="0.01" /><input name="title-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="title-color" type="color" /><input name="title-bold" type="checkbox" /></div>
               <div class="wide text-row"><strong>奖励</strong><input name="reward-text" /><input name="reward-x" type="number" min="0" max="1" step="0.01" /><input name="reward-y" type="number" min="0" max="1" step="0.01" /><input name="reward-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="reward-color" type="color" /><input name="reward-bold" type="checkbox" /></div>
               <div class="wide text-row"><strong>星币</strong><input name="coins-text" /><input name="coins-x" type="number" min="0" max="1" step="0.01" /><input name="coins-y" type="number" min="0" max="1" step="0.01" /><input name="coins-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="coins-color" type="color" /><input name="coins-bold" type="checkbox" /></div>
-              <div class="wide text-row"><strong>入场券</strong><input name="tickets-text" /><input name="tickets-x" type="number" min="0" max="1" step="0.01" /><input name="tickets-y" type="number" min="0" max="1" step="0.01" /><input name="tickets-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="tickets-color" type="color" /><input name="tickets-bold" type="checkbox" /></div>
-              <div class="wide text-row"><strong>概率</strong><input name="probability-text" /><input name="probability-x" type="number" min="0" max="1" step="0.01" /><input name="probability-y" type="number" min="0" max="1" step="0.01" /><input name="probability-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="probability-color" type="color" /><input name="probability-bold" type="checkbox" /></div>
+              <div class="wide text-row"><strong>附言</strong><input name="message-text" /><input name="message-x" type="number" min="0" max="1" step="0.01" /><input name="message-y" type="number" min="0" max="1" step="0.01" /><input name="message-size" type="number" min="0.015" max="0.15" step="0.005" /><input name="message-color" type="color" /><input name="message-bold" type="checkbox" /></div>
             </form>
-            <div class="upload-row"><input id="checkin-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /><button id="upload-checkin-background">上传背景</button><button id="preview-checkin-template" class="secondary">生成效果预览</button><button id="save-checkin-template">保存模板</button><button id="delete-checkin-template" class="danger">删除模板</button></div>
+            <div id="checkin-dropzone" class="dropzone compact" tabindex="0"><strong>打卡背景上传区</strong><span>选择、拖放或点击后 Ctrl+V 粘贴真实图片。</span><input id="checkin-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
+            <div class="upload-row"><button id="preview-checkin-template" class="secondary">生成效果预览</button><button id="save-checkin-template">保存模板</button><button id="delete-checkin-template" class="danger">删除模板</button></div>
             <img id="checkin-preview" class="checkin-preview" alt="打卡成品预览" />
           </div>
         </div>
       </section>
 
       <section class="panel grant-panel">
-        <div class="panel-head">
-          <h2>赠送角色</h2>
-          <span>选择已记录玩家，或手动填写群/用户 ID。</span>
-        </div>
+        <div class="panel-head"><div><h2>发放同伴、皮肤与专属物品</h2><span>可从已记录玩家选择，或手填群/用户 ID。</span></div></div>
         <div class="grant-grid">
-          <label>
-            已记录玩家
-            <select id="known-player"></select>
-          </label>
-          <label>
-            群/会话 Scope ID
-            <input id="grant-scope" placeholder="群号或 session id" />
-          </label>
-          <label>
-            用户 ID
-            <input id="grant-user" placeholder="QQ / 平台用户 ID" />
-          </label>
-          <label>
-            昵称
-            <input id="grant-name" placeholder="可选" />
-          </label>
-          <label>
-            角色
-            <select id="grant-character"></select>
-          </label>
-          <button id="grant-button">赠送</button>
+          <label>已记录玩家<select id="known-player"></select></label><label>群/会话 Scope ID<input id="grant-scope" placeholder="群号或 session id" /></label><label>用户 ID<input id="grant-user" placeholder="QQ / 平台用户 ID" /></label><label>昵称<input id="grant-name" placeholder="可选" /></label><label>同伴 / 皮肤 / 道具<select id="grant-character"></select></label><button id="grant-button">发放条目</button>
+          <label>专属物品所属同伴<select id="grant-exclusive"></select></label><button id="grant-exclusive-button">发放专属物品</button>
         </div>
       </section>
-
       <div id="toast" class="toast"></div>
     </main>
     <script type="module" src="./app.js"></script>
