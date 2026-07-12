@@ -39,15 +39,47 @@ async function apiDelete(path) { return apiPost(`${path}/delete`, {}); }
 
 async function upload(path, file) {
   const api = bridge(); const target = endpoint(path);
-  if (api.upload) return api.upload(target, file);
+  let bridgeError = null;
+  if (api.upload) {
+    try { return await api.upload(target, file); }
+    catch (error) { bridgeError = error; }
+  }
+  // AstrBot's ordinary JSON bridge is more reliable than multipart in some
+  // desktop WebUI builds. Fall back for normal-sized images instead of
+  // presenting the unhelpful browser-level “Network Error”.
+  if (api.apiPost && file && file.size <= 10 * 1024 * 1024) {
+    try {
+      return await api.apiPost(`${target}/data-url`, {
+        filename: file.name || 'upload.png',
+        data_url: await fileAsDataUrl(file),
+      });
+    } catch (fallbackError) {
+      throw new Error(fallbackError?.message || bridgeError?.message || '图片上传失败');
+    }
+  }
+  if (bridgeError) throw bridgeError;
   const form = new FormData(); form.append('file', file);
   return parseResponse(await fetch(`/api/plug/${encodeURIComponent(PLUGIN)}/${target}`, { method: 'POST', body: form }));
+}
+
+function fileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取图片失败，请重新选择文件。'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
 }
 
 function normalizeResponse(result) { return result?.data || result || {}; }
 function assetUrl(image, kind = 'assets') { return image ? `/api/plug/${PLUGIN}/${kind}/${encodeURIComponent(image)}` : ''; }
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;'); }
 function kindLabel(kind) { return ({ companion: '同伴', skin: '皮肤', item: '道具' })[kind] || '同伴'; }
+function exclusiveItemNames(entry) {
+  const raw = entry?.exclusive_items?.length ? entry.exclusive_items : (entry?.exclusive_item || '');
+  const values = Array.isArray(raw) ? raw : String(raw).split(/[\r\n,，;；]+/);
+  return [...new Set(values.map((value) => String(value?.name || value || '').trim()).filter(Boolean))];
+}
 
 function toast(message) {
   const el = $('#toast'); el.textContent = message; el.classList.add('show');
@@ -56,6 +88,24 @@ function toast(message) {
 
 function errorText(error) { return error?.message || '操作失败，请查看控制台'; }
 async function safely(action) { try { await action(); } catch (error) { console.error(error); toast(errorText(error)); } }
+function confirmDelete(button, label) {
+  const now = Date.now(); const until = Number(button.dataset.confirmUntil || 0);
+  if (until > now) {
+    window.clearTimeout(Number(button.dataset.confirmTimer || 0));
+    button.textContent = button.dataset.defaultLabel || '删除';
+    delete button.dataset.confirmUntil; delete button.dataset.confirmTimer;
+    return true;
+  }
+  button.dataset.defaultLabel = button.textContent;
+  button.dataset.confirmUntil = String(now + 5000);
+  button.textContent = '再次点击确认删除';
+  toast(`请在 5 秒内再次点击，确认删除${label}。`);
+  button.dataset.confirmTimer = String(window.setTimeout(() => {
+    button.textContent = button.dataset.defaultLabel || '删除';
+    delete button.dataset.confirmUntil; delete button.dataset.confirmTimer;
+  }, 5000));
+  return false;
+}
 
 async function loadAll() {
   const payload = normalizeResponse(await apiGet('/characters'));
@@ -145,8 +195,13 @@ function renderPlayerOptions() {
 function renderGrantOptions() {
   const select = $('#grant-character'); select.innerHTML = '';
   characters.forEach((entry) => { const option = document.createElement('option'); option.value = entry.id; option.textContent = `${kindLabel(entry.kind)} · ${entry.name} / ${entry.english_name || entry.quality || '—'}`; select.appendChild(option); });
-  const exclusive = $('#grant-exclusive'); exclusive.innerHTML = '<option value="">选择设置过专属物品的同伴</option>';
-  characters.filter((entry) => entry.kind === 'companion' && entry.exclusive_item).forEach((entry) => { const option = document.createElement('option'); option.value = entry.id; option.textContent = `${entry.name} · ${entry.exclusive_item}`; exclusive.appendChild(option); });
+  const exclusive = $('#grant-exclusive'); exclusive.innerHTML = '<option value="">选择要发放的专属物品</option>';
+  characters.filter((entry) => entry.kind === 'companion').forEach((entry) => {
+    exclusiveItemNames(entry).forEach((exclusiveName) => {
+      const option = document.createElement('option'); option.value = entry.id; option.dataset.exclusiveName = exclusiveName;
+      option.textContent = `${entry.name} · ${exclusiveName}`; exclusive.appendChild(option);
+    });
+  });
 }
 
 function setValue(form, name, value = '') { if (form.elements[name]) form.elements[name].value = value ?? ''; }
@@ -163,7 +218,7 @@ function toggleKindFields(kind) {
 function fillForm(entry) {
   const form = $('#character-form'); if (!entry) { form.reset(); toggleKindFields('companion'); return; }
   selectedId = entry.id; setValue(form, 'kind', entry.kind || 'companion'); setValue(form, 'id', entry.id); setValue(form, 'name', entry.name);
-  setValue(form, 'english_name', entry.english_name || entry.skin || ''); setValue(form, 'quality', entry.quality || entry.star || 'R'); setValue(form, 'parent_id', entry.parent_id || ''); setValue(form, 'exclusive_item', entry.exclusive_item || '');
+  setValue(form, 'english_name', entry.english_name || entry.skin || ''); setValue(form, 'quality', entry.quality || entry.star || 'R'); setValue(form, 'parent_id', entry.parent_id || ''); setValue(form, 'exclusive_items', exclusiveItemNames(entry).join('\n'));
   setValue(form, 'route', entry.route || ''); setValue(form, 'bonus', entry.bonus || ''); setValue(form, 'intro', entry.intro || ''); setValue(form, 'effect', entry.effect || ''); setValue(form, 'image', entry.image || ''); setValue(form, 'focal_x', entry.focal_x ?? 0.5); setValue(form, 'focal_y', entry.focal_y ?? 0.5); setChecked(form, 'in_pool', entry.in_pool);
   const skills = entry.skills || []; [0, 1, 2].forEach((index) => { setValue(form, `skill${index}`, skills[index]?.[0] || ''); setValue(form, `skill${index}Desc`, skills[index]?.[1] || ''); });
   $('#parent-companion').value = entry.parent_id || ''; toggleKindFields(entry.kind || 'companion');
@@ -174,7 +229,7 @@ function readForm() {
   const form = $('#character-form'); const kind = form.elements.kind.value;
   return {
     id: form.elements.id.value.trim(), kind, name: form.elements.name.value.trim(), english_name: form.elements.english_name.value.trim(), quality: form.elements.quality.value.trim(), parent_id: form.elements.parent_id.value,
-    exclusive_item: form.elements.exclusive_item.value.trim(), route: form.elements.route.value.trim(), bonus: form.elements.bonus.value.trim(), intro: form.elements.intro.value.trim(), effect: form.elements.effect.value.trim(), image: form.elements.image.value.trim(), in_pool: form.elements.in_pool.checked,
+    exclusive_items: form.elements.exclusive_items.value.trim(), route: form.elements.route.value.trim(), bonus: form.elements.bonus.value.trim(), intro: form.elements.intro.value.trim(), effect: form.elements.effect.value.trim(), image: form.elements.image.value.trim(), in_pool: form.elements.in_pool.checked,
     focal_x: Number(form.elements.focal_x.value), focal_y: Number(form.elements.focal_y.value),
     skills: [[form.elements.skill0.value.trim(), form.elements.skill0Desc.value.trim()], [form.elements.skill1.value.trim(), form.elements.skill1Desc.value.trim()], [form.elements.skill2.value.trim(), form.elements.skill2Desc.value.trim()]],
   };
@@ -246,20 +301,20 @@ $$('.type-filter button').forEach((button) => button.addEventListener('click', (
 $('#character-form').elements.kind.addEventListener('change', (event) => toggleKindFields(event.target.value));
 $('#new-character').addEventListener('click', () => { selectedId = ''; const form = $('#character-form'); form.reset(); form.elements.kind.value = 'companion'; form.elements.quality.value = 'SR'; form.elements.focal_x.value = '0.5'; form.elements.focal_y.value = '0.5'; toggleKindFields('companion'); $('#preview-image').removeAttribute('src'); $('#preview-title').textContent = '新增条目'; $('#preview-subtitle').textContent = '填写资料后上传图片；可调画面焦点。'; renderList(); });
 $('#save-button').addEventListener('click', () => safely(async () => { const data = readForm(); if (!data.id || !data.name) { toast('ID 和中文名称必填'); return; } if (data.kind === 'skin' && !data.parent_id) { toast('皮肤必须选择所属同伴'); return; } $('#save-state').textContent = '保存中…'; const result = normalizeResponse(await apiPost('/characters', data)); $('#save-state').textContent = ''; selectedId = result.character?.id || data.id; toast('已保存条目'); await loadAll(); }));
-$('#delete-button').addEventListener('click', () => safely(async () => { const id = $('#character-form').elements.id.value.trim(); if (!id || !window.confirm(`确定删除 ${id}？玩家已有资产不会自动删除。`)) return; await apiDelete(`/characters/${id}`); selectedId = ''; toast('已删除条目'); await loadAll(); }));
+$('#delete-button').addEventListener('click', () => safely(async () => { const id = $('#character-form').elements.id.value.trim(); if (!id || !confirmDelete($('#delete-button'), `条目 ${id}（玩家已有资产不会自动删除）`)) return; await apiDelete(`/characters/${id}`); selectedId = ''; toast('已删除条目'); await loadAll(); }));
 bindImageDropzone('#image-dropzone', '#image-upload', uploadEntryFile, 'pasted-entry.png');
 
 $('#save-settings').addEventListener('click', () => safely(async () => { const result = normalizeResponse(await apiPost('/settings', readSettings())); settings = result.settings || settings; toast('视觉色板已保存'); }));
 $('#known-player').addEventListener('change', (event) => { const player = players[Number(event.target.value)]; if (!player) return; $('#grant-scope').value = player.scope_id; $('#grant-user').value = player.user_id; $('#grant-name').value = player.name; });
 function grantPayload() { return { scope_id: $('#grant-scope').value.trim(), user_id: $('#grant-user').value.trim(), name: $('#grant-name').value.trim() }; }
 $('#grant-button').addEventListener('click', () => safely(async () => { const payload = { ...grantPayload(), character_id: $('#grant-character').value }; if (!payload.scope_id || !payload.user_id || !payload.character_id) { toast('请填写群/用户/条目'); return; } const result = normalizeResponse(await apiPost('/grant', payload)); toast(result.created ? '已发放条目' : '玩家已拥有该条目'); await loadAll(); }));
-$('#grant-exclusive-button').addEventListener('click', () => safely(async () => { const payload = { ...grantPayload(), companion_id: $('#grant-exclusive').value }; if (!payload.scope_id || !payload.user_id || !payload.companion_id) { toast('请填写群/用户/专属物品所属同伴'); return; } await apiPost('/grant-exclusive', payload); toast('已发放专属物品'); await loadAll(); }));
+$('#grant-exclusive-button').addEventListener('click', () => safely(async () => { const select = $('#grant-exclusive'); const option = select.options[select.selectedIndex]; const payload = { ...grantPayload(), companion_id: select.value, exclusive_name: option?.dataset.exclusiveName || '' }; if (!payload.scope_id || !payload.user_id || !payload.companion_id || !payload.exclusive_name) { toast('请填写群/用户并选择专属物品'); return; } await apiPost('/grant-exclusive', payload); toast('已发放专属物品'); await loadAll(); }));
 
 $('#new-checkin-template').addEventListener('click', () => { selectedTemplateId = ''; fillTemplate(newTemplate()); renderTemplateList(); });
 $('#checkin-template-form').addEventListener('input', scheduleCheckinPreview);
 $('#preview-checkin-template').addEventListener('click', () => safely(() => updateCheckinPreview(false)));
 $('#save-checkin-template').addEventListener('click', () => safely(async () => { const template = readTemplate(); if (!template.id || !template.name) { toast('模板 ID 和名称必填'); return; } const result = normalizeResponse(await apiPost('/checkin-templates', template)); selectedTemplateId = result.template?.id || template.id; toast('已保存打卡模板'); await loadAll(); }));
-$('#delete-checkin-template').addEventListener('click', () => safely(async () => { const id = $('#checkin-template-form').elements.id.value.trim(); if (!id || !window.confirm(`确定删除打卡模板 ${id}？`)) return; await apiDelete(`/checkin-templates/${id}`); selectedTemplateId = ''; toast('已删除模板'); await loadAll(); }));
+$('#delete-checkin-template').addEventListener('click', () => safely(async () => { const id = $('#checkin-template-form').elements.id.value.trim(); if (!id || !confirmDelete($('#delete-checkin-template'), `打卡模板 ${id}`)) return; await apiDelete(`/checkin-templates/${id}`); selectedTemplateId = ''; toast('已删除模板'); await loadAll(); }));
 bindImageDropzone('#checkin-dropzone', '#checkin-background-upload', uploadCheckinFile, 'pasted-checkin.png');
 
 async function boot() { if (bridge().ready) await bridge().ready(); await loadAll(); }

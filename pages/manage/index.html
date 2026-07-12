@@ -45,7 +45,7 @@
             <label>英文名 / 副标题<input name="english_name" placeholder="Blue Predator" /></label>
             <label>品质<input name="quality" placeholder="SSR / 普通 / 中级 / 高级" /></label>
             <label class="skin-only">所属同伴<select name="parent_id" id="parent-companion"></select></label>
-            <label class="companion-only">专属物品名称<input name="exclusive_item" placeholder="灵儿的信物" /></label>
+            <label class="companion-only wide">专属物品（每行一件）<textarea name="exclusive_items" rows="3" placeholder="灵儿的信物&#10;灵儿的徽章&#10;灵儿的钥匙"></textarea></label>
             <label>图片文件<input name="image" placeholder="上传后自动填入" /></label>
             <label>画面焦点 X<input name="focal_x" type="number" min="0" max="1" step="0.01" value="0.5" /></label>
             <label>画面焦点 Y<input name="focal_y" type="number" min="0" max="1" step="0.01" value="0.5" /></label>
@@ -104,7 +104,7 @@
         <div class="panel-head"><div><h2>发放同伴、皮肤与专属物品</h2><span>可从已记录玩家选择，或手填群/用户 ID。</span></div></div>
         <div class="grant-grid">
           <label>已记录玩家<select id="known-player"></select></label><label>群/会话 Scope ID<input id="grant-scope" placeholder="群号或 session id" /></label><label>用户 ID<input id="grant-user" placeholder="QQ / 平台用户 ID" /></label><label>昵称<input id="grant-name" placeholder="可选" /></label><label>同伴 / 皮肤 / 道具<select id="grant-character"></select></label><button id="grant-button">发放条目</button>
-          <label>专属物品所属同伴<select id="grant-exclusive"></select></label><button id="grant-exclusive-button">发放专属物品</button>
+          <label>专属物品<select id="grant-exclusive"></select></label><button id="grant-exclusive-button">发放专属物品</button>
         </div>
       </section>
       <div id="toast" class="toast"></div>

@@ -151,7 +151,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     },
 ]
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、星币、打卡与抽奖插件", "2.0.0")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、星币、打卡与抽奖插件", "2.1.0")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -322,11 +322,13 @@ class JubenNpcPlugin(Star):
             yield event.image_result(str(self._render_notice_card("赠送失败", "格式：/赠送专属 @群友 同伴名")))
             return
         target = self._get_player_by_id(event, target_id, target_label)
+        before_owned = set(self._owned_exclusive_item_names(target, companion["id"]))
         if not self._grant_exclusive_item(target, companion["id"]):
-            yield event.image_result(str(self._render_notice_card("赠送失败", "该同伴没有专属物品，或对方已经拥有。")))
+            yield event.image_result(str(self._render_notice_card("赠送失败", "该同伴没有可赠送的专属物品，或对方已经全部拥有。")))
             return
         self._save_db()
-        yield event.image_result(str(self._render_notice_card("专属物品已赠送", f"{target_label} 获得了 {companion['exclusive_item']}。")))
+        granted = next((name for name in self._owned_exclusive_item_names(target, companion["id"]) if name not in before_owned), "专属物品")
+        yield event.image_result(str(self._render_notice_card("专属物品已赠送", f"{target_label} 获得了 {granted}。")))
 
     @filter.command("打卡", alias={"每日打卡"})
     async def checkin_cmd(self, event: AstrMessageEvent):
@@ -526,7 +528,16 @@ class JubenNpcPlugin(Star):
                 return jsonify({"status": "error", "message": "没有收到图片文件。"}), 400
             try:
                 saved_name = await self._save_uploaded_image(file)
-            except (ValueError, OSError) as exc:
+            except Exception as exc:
+                logger.warning(f"同伴图片上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"assets/{saved_name}"})
+
+        async def upload_image_data_url():
+            try:
+                saved_name = await self._save_data_url_image((await request.get_json()) or {})
+            except Exception as exc:
+                logger.warning(f"同伴图片备用上传失败：{exc}")
                 return jsonify({"status": "error", "message": str(exc)}), 400
             return jsonify({"ok": True, "image": saved_name, "url": f"assets/{saved_name}"})
 
@@ -559,7 +570,18 @@ class JubenNpcPlugin(Star):
                 return jsonify({"status": "error", "message": "没有收到背景图片文件。"}), 400
             try:
                 saved_name = await self._save_uploaded_image(file, self.checkin_assets_dir, "checkin")
-            except (ValueError, OSError) as exc:
+            except Exception as exc:
+                logger.warning(f"打卡背景上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
+
+        async def upload_checkin_background_data_url():
+            try:
+                saved_name = await self._save_data_url_image(
+                    (await request.get_json()) or {}, self.checkin_assets_dir, "checkin"
+                )
+            except Exception as exc:
+                logger.warning(f"打卡背景备用上传失败：{exc}")
                 return jsonify({"status": "error", "message": str(exc)}), 400
             return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
 
@@ -596,13 +618,14 @@ class JubenNpcPlugin(Star):
             scope_id = str(data.get("scope_id", "")).strip()
             user_id = str(data.get("user_id", "")).strip()
             companion_id = str(data.get("companion_id", "")).strip()
+            exclusive_name = str(data.get("exclusive_name", "")).strip()
             name = str(data.get("name", user_id)).strip() or user_id
             if not scope_id or not user_id or not companion_id:
                 return jsonify({"status": "error", "message": "scope_id、user_id 或 companion_id 无效。"}), 400
             player = self._get_player_by_scope(scope_id, user_id, name)
-            created = self._grant_exclusive_item(player, companion_id)
+            created = self._grant_exclusive_item(player, companion_id, exclusive_name)
             if not created:
-                return jsonify({"status": "error", "message": "同伴不存在、未设置专属物品，或玩家已拥有该专属物品。"}), 400
+                return jsonify({"status": "error", "message": "同伴不存在、未设置该专属物品，或玩家已拥有该专属物品。"}), 400
             self._save_db()
             return jsonify({"ok": True, "created": True, "player": player})
 
@@ -630,10 +653,12 @@ class JubenNpcPlugin(Star):
         context.register_web_api(f"/{PLUGIN_NAME}/characters", save_character, ["POST"], "Save NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/characters/<character_id>/delete", delete_character, ["POST"], "Delete NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-image", upload_image, ["POST"], "Upload NPC image")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-image/data-url", upload_image_data_url, ["POST"], "Upload NPC image fallback")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates", list_checkin_templates, ["GET"], "List check-in templates")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates", save_checkin_template, ["POST"], "Save check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/<template_id>/delete", delete_checkin_template, ["POST"], "Delete check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-background", upload_checkin_background, ["POST"], "Upload check-in background")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-background/data-url", upload_checkin_background_data_url, ["POST"], "Upload check-in background fallback")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/preview", preview_checkin_template, ["POST"], "Preview check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/grant-exclusive", grant_exclusive_item, ["POST"], "Grant companion exclusive item")
@@ -850,6 +875,29 @@ class JubenNpcPlugin(Star):
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _normalize_exclusive_item_names(value: Any) -> List[str]:
+        """Accept legacy text as well as the multi-item operator form."""
+        if isinstance(value, dict):
+            value = value.get("items") or value.get("names") or value.get("name") or []
+        if isinstance(value, str):
+            values = re.split(r"[\r\n,，;；]+", value)
+        elif isinstance(value, (list, tuple, set)):
+            values = value
+        else:
+            values = []
+        names: List[str] = []
+        seen = set()
+        for raw in values:
+            name = str(raw.get("name", "") if isinstance(raw, dict) else raw).strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name[:40])
+            if len(names) >= 20:
+                break
+        return names
+
     def _save_characters(self):
         self.data_dir.mkdir(exist_ok=True)
         payload = {"characters": self.characters}
@@ -924,6 +972,10 @@ class JubenNpcPlugin(Star):
         while len(normalized_skills) < 3:
             normalized_skills.append(["未命名技能", "待填写。"])
 
+        raw_exclusive_items = data.get("exclusive_items")
+        if raw_exclusive_items in (None, "", []):
+            raw_exclusive_items = data.get("exclusive_item")
+        exclusive_items = self._normalize_exclusive_item_names(raw_exclusive_items)
         return {
             "id": character_id,
             "kind": COMPANION_KIND,
@@ -939,7 +991,10 @@ class JubenNpcPlugin(Star):
             "skills": normalized_skills,
             "colors": [str(colors[0]), str(colors[1]), str(colors[2])],
             "image": image,
-            "exclusive_item": str(data.get("exclusive_item") or "").strip(),
+            # ``exclusive_item`` is retained for legacy clients and old player
+            # saves; the new list is the source of truth and can hold many items.
+            "exclusive_item": exclusive_items[0] if exclusive_items else "",
+            "exclusive_items": exclusive_items,
             "in_pool": bool(data.get("in_pool", data.get("featured", False))),
             "featured": bool(data.get("in_pool", data.get("featured", False))),
             "focal_x": self._template_number(data.get("focal_x"), 0.5, 0, 1),
@@ -1194,10 +1249,32 @@ class JubenNpcPlugin(Star):
         if not isinstance(exclusive_items, dict):
             player["exclusive_items"] = exclusive_items = {}
         for companion_id, value in list(exclusive_items.items()):
+            companion = self._character_or_none(str(companion_id))
+            names = self._exclusive_item_names(companion)
+            legacy_name = names[0] if names else "__legacy__"
             if isinstance(value, str):
-                exclusive_items[companion_id] = {"owned_at": value}
-            elif not isinstance(value, dict):
-                exclusive_items[companion_id] = {"owned_at": ""}
+                exclusive_items[companion_id] = {legacy_name: {"owned_at": value}}
+                continue
+            if not isinstance(value, dict):
+                exclusive_items[companion_id] = {legacy_name: {"owned_at": ""}}
+                continue
+            # v2 stored one record directly under the companion ID.  v2.1
+            # stores one ownership record per exclusive item name.
+            if "owned_at" in value:
+                exclusive_items[companion_id] = {
+                    legacy_name: {"owned_at": str(value.get("owned_at") or "")}
+                }
+                continue
+            normalized_owned = {}
+            for item_name, record in value.items():
+                name = str(item_name).strip()
+                if not name:
+                    continue
+                if isinstance(record, str):
+                    normalized_owned[name] = {"owned_at": record}
+                elif isinstance(record, dict):
+                    normalized_owned[name] = {"owned_at": str(record.get("owned_at") or "")}
+            exclusive_items[companion_id] = normalized_owned
 
         draw_state = player.setdefault("draw_state", {})
         if not isinstance(draw_state, dict):
@@ -1281,17 +1358,51 @@ class JubenNpcPlugin(Star):
         player["npcs"][entry["id"]] = {"exp": 0, "owned_at": now, "full_at": ""}
         return True
 
-    def _grant_exclusive_item(self, player: Dict[str, Any], companion_id: str) -> bool:
+    def _exclusive_item_names(self, companion: Optional[Dict[str, Any]]) -> List[str]:
+        if not companion or companion.get("kind") != COMPANION_KIND:
+            return []
+        names = self._normalize_exclusive_item_names(companion.get("exclusive_items"))
+        if not names:
+            names = self._normalize_exclusive_item_names(companion.get("exclusive_item"))
+        return names
+
+    def _owned_exclusive_item_names(self, player: Dict[str, Any], companion_id: str) -> List[str]:
+        owned = player.get("exclusive_items", {}).get(companion_id, {})
+        if not isinstance(owned, dict):
+            return []
+        return [str(name) for name in owned if str(name) != "__legacy__"]
+
+    def _grant_exclusive_item(
+        self,
+        player: Dict[str, Any],
+        companion_id: str,
+        exclusive_name: str = "",
+    ) -> bool:
         companion = self._character_or_none(companion_id)
-        if not companion or companion.get("kind") != COMPANION_KIND or not companion.get("exclusive_item"):
+        available = self._exclusive_item_names(companion)
+        if not available:
             return False
-        if companion_id in player["exclusive_items"]:
+        owned = player.setdefault("exclusive_items", {}).setdefault(companion_id, {})
+        if not isinstance(owned, dict):
+            player["exclusive_items"][companion_id] = owned = {}
+        requested = str(exclusive_name or "").strip()
+        if requested and requested not in available:
             return False
-        player["exclusive_items"][companion_id] = {"owned_at": datetime.now().strftime("%Y-%m-%d")}
+        target = requested or next((name for name in available if name not in owned), "")
+        if not target or target in owned:
+            return False
+        owned[target] = {"owned_at": datetime.now().strftime("%Y-%m-%d")}
         return True
 
-    def _has_exclusive_item(self, player: Dict[str, Any], companion_id: str) -> bool:
-        return companion_id in player.get("exclusive_items", {})
+    def _has_exclusive_item(
+        self, player: Dict[str, Any], companion_id: str, exclusive_name: str = ""
+    ) -> bool:
+        owned = player.get("exclusive_items", {}).get(companion_id, {})
+        if not isinstance(owned, dict):
+            return False
+        if exclusive_name:
+            return exclusive_name in owned
+        return bool(owned)
 
     def _npc_exp(self, player: Dict[str, Any], character_id: str) -> int:
         return int(player["npcs"].get(character_id, {}).get("exp", 0))
@@ -1591,6 +1702,50 @@ class JubenNpcPlugin(Star):
                 if inspect.isawaitable(content):
                     content = await content
                 dest.write_bytes(content)
+        self._validate_uploaded_image(dest)
+        return saved_name
+
+    async def _save_data_url_image(
+        self,
+        payload: Dict[str, Any],
+        destination: Optional[Path] = None,
+        prefix: str = "custom",
+    ) -> str:
+        """Store a FileReader data URL when the browser multipart bridge is unavailable."""
+        if not isinstance(payload, dict):
+            raise ValueError("上传数据格式无效。")
+        data_url = str(payload.get("data_url") or "").strip()
+        header, separator, encoded = data_url.partition(",")
+        if not separator or ";base64" not in header.lower():
+            raise ValueError("没有收到有效的图片数据。")
+        raw_name = Path(str(payload.get("filename") or "character.png")).name
+        suffix = Path(raw_name).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            mime = header.split(";", 1)[0].lower()
+            suffix = {
+                "data:image/png": ".png",
+                "data:image/jpeg": ".jpg",
+                "data:image/webp": ".webp",
+            }.get(mime, "")
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            raise ValueError("仅支持 PNG、JPG、JPEG 或 WebP 图片。")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("图片数据已损坏，请重新选择图片。") from exc
+        if not content:
+            raise ValueError("图片内容为空。")
+        if len(content) > 15 * 1024 * 1024:
+            raise ValueError("图片不能超过 15MB。")
+        saved_name = f"{prefix}_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}{suffix}"
+        dest = (destination or self.assets_dir) / saved_name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(content)
+        self._validate_uploaded_image(dest)
+        return saved_name
+
+    @staticmethod
+    def _validate_uploaded_image(dest: Path) -> None:
         if dest.stat().st_size > 15 * 1024 * 1024:
             dest.unlink(missing_ok=True)
             raise ValueError("图片不能超过 15MB。")
@@ -1606,7 +1761,6 @@ class JubenNpcPlugin(Star):
         except Exception:
             dest.unlink(missing_ok=True)
             raise ValueError("上传文件不是有效图片或图片已损坏。")
-        return saved_name
 
     @staticmethod
     def _image_data_url(image: Image.Image) -> str:
@@ -1980,7 +2134,16 @@ class JubenNpcPlugin(Star):
                 # lower-level bar.
                 _, _, _, progress_ratio = self._level_info(exp)
                 sort_key = (1, -progress_ratio, -quality_rank, str(record.get("owned_at") or ""), companion["id"])
-            all_groups.append((sort_key, companion, own_companion, owned_skins, exp))
+            all_groups.append(
+                (
+                    sort_key,
+                    companion,
+                    own_companion,
+                    owned_skins,
+                    exp,
+                    self._exclusive_item_names(companion),
+                )
+            )
         all_groups.sort(key=lambda group: group[0])
 
         # A companion can own many skins.  Split those skins into small visual
@@ -1989,9 +2152,9 @@ class JubenNpcPlugin(Star):
         # repeat the parent row, keeping every skin visibly attached to it.
         skins_per_segment = 2
         segmented_groups = []
-        for sort_key, companion, own_companion, owned_skins, exp in all_groups:
+        for sort_key, companion, own_companion, owned_skins, exp, exclusive_items in all_groups:
             if not owned_skins:
-                segmented_groups.append((sort_key, companion, own_companion, [], exp, 0))
+                segmented_groups.append((sort_key, companion, own_companion, [], exp, 0, exclusive_items))
                 continue
             for skin_offset in range(0, len(owned_skins), skins_per_segment):
                 segmented_groups.append(
@@ -2002,6 +2165,7 @@ class JubenNpcPlugin(Star):
                         owned_skins[skin_offset: skin_offset + skins_per_segment],
                         exp,
                         skin_offset,
+                        exclusive_items,
                     )
                 )
 
@@ -2009,7 +2173,17 @@ class JubenNpcPlugin(Star):
         total_pages = max(1, (len(segmented_groups) + per_page - 1) // per_page)
         page = max(1, min(total_pages, page))
         groups = segmented_groups[(page - 1) * per_page: page * per_page]
-        height = max(720, 180 + sum(182 + len(skins) * 104 for _, _, _, skins, _, _ in groups) + 45)
+        def companion_row_height(exclusive_items: List[str]) -> int:
+            rows = (len(exclusive_items) + 1) // 2
+            return 164 + max(0, rows - 1) * 38
+
+        height = max(
+            720,
+            180 + sum(
+                companion_row_height(exclusive_items) + 18 + len(skins) * 104
+                for _, _, _, skins, _, _, exclusive_items in groups
+            ) + 45,
+        )
         path = self.render_dir / f"companions_{player['user_id']}_{page}.png"
         img = self._gradient((1280, height), "#173044", "#edf3f7").convert("RGBA")
         draw = ImageDraw.Draw(img)
@@ -2030,10 +2204,11 @@ class JubenNpcPlugin(Star):
             return path
 
         y = 164
-        for _, companion, own_companion, owned_skins, exp, skin_offset in groups:
+        for _, companion, own_companion, owned_skins, exp, skin_offset, exclusive_items in groups:
+            row_height = companion_row_height(exclusive_items)
             main = companion["colors"][0]
             row_fill = (255, 255, 255, 238) if own_companion else (229, 234, 240, 232)
-            draw.rounded_rectangle((52, y, 1228, y + 164), radius=18, fill=row_fill, outline=border_color, width=3)
+            draw.rounded_rectangle((52, y, 1228, y + row_height), radius=18, fill=row_fill, outline=border_color, width=3)
             portrait = self._portrait(companion, (214, 148))
             if not own_companion:
                 portrait = ImageEnhance.Color(portrait).enhance(0.05).filter(ImageFilter.GaussianBlur(0.45))
@@ -2047,19 +2222,23 @@ class JubenNpcPlugin(Star):
             if own_companion:
                 draw.rounded_rectangle((304, y + 93, 304 + int(499 * ratio), y + 115), radius=11, fill=main)
             draw.text((825, y + 89), f"{'已拥有' if own_companion else '未获得'}  Lv.{level}  {current}/{need}", font=self._font(20), fill=sub_fill)
-            if companion.get("exclusive_item"):
-                exclusive_owned = self._has_exclusive_item(player, companion["id"])
+            for item_index, exclusive_name in enumerate(exclusive_items):
+                column, item_row = item_index % 2, item_index // 2
+                item_x = 304 + column * 394
+                item_y = y + 126 + item_row * 38
+                exclusive_owned = self._has_exclusive_item(player, companion["id"], exclusive_name)
                 item_color = exclusive_color if exclusive_owned else "#9aa4b3"
                 item_border = exclusive_border if exclusive_owned else "#c5ccd6"
-                draw.rounded_rectangle((304, y + 126, 635, y + 158), radius=10, outline=item_border, width=2, fill=(255, 255, 255, 35))
-                draw.text((321, y + 130), f"专属物品：{companion['exclusive_item']}", font=self._font(17, True), fill=item_color)
+                draw.rounded_rectangle((item_x, item_y, item_x + 370, item_y + 32), radius=10, outline=item_border, width=2, fill=(255, 255, 255, 35))
+                label = f"专属物品：{exclusive_name}"
+                draw.text((item_x + 15, item_y + 4), label[:22], font=self._font(16, True), fill=item_color)
             if companion["id"] == player.get("current_npc"):
                 draw.rounded_rectangle((1120, y + 16, 1204, y + 49), radius=12, fill=main)
                 draw.text((1137, y + 20), "当前", font=self._font(17, True), fill="white")
             if skin_offset:
                 draw.rounded_rectangle((995, y + 16, 1098, y + 49), radius=12, fill="#7d8798")
                 draw.text((1010, y + 20), "皮肤续页", font=self._font(15, True), fill="white")
-            y += 182
+            y += row_height + 18
 
             for skin in owned_skins:
                 draw.rounded_rectangle((122, y, 1175, y + 82), radius=16, fill=(255, 255, 255, 225), outline=border_color, width=2)
@@ -2089,9 +2268,12 @@ class JubenNpcPlugin(Star):
         draw = ImageDraw.Draw(img)
         draw.text((58, 38), "道具栏", font=self._font(54, True), fill="white")
         draw.text((60, 105), f"已获得道具：{sum(int(value.get('count', 0) or 0) for value in player.get('items', {}).values())}    第 {page}/{total_pages} 页", font=self._font(24), fill="#dbe7f0")
+        # Keep the shelf visually complete on an empty or partly-filled page.
+        # Entries are capped at 8 per page, so they always stay inside this area.
+        draw.rounded_rectangle((45, 160, 1235, 860), radius=24, fill=(255, 255, 255, 222))
         if not entries:
-            draw.rounded_rectangle((55, 180, 1225, 680), radius=24, fill=(255, 255, 255, 238))
-            draw.text((105, 380), "暂未获得道具", font=self._font(38, True), fill=self.settings["item_name_color"])
+            draw.text((105, 470), "暂未获得道具", font=self._font(38, True), fill=self.settings["item_name_color"])
+            draw.text((105, 530), "抽奖、活动和管理员赠送获得的道具会陈列在这里。", font=self._font(22), fill=self.settings["item_effect_color"])
             img.save(path)
             return path
         for index, item in enumerate(entries):
