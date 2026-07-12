@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 from quart import jsonify, request, send_file
 
 
@@ -50,8 +50,10 @@ PLUGIN_NAME = "astrbot_plugin_juben_npc"
 COMPANION_KIND = "companion"
 SKIN_KIND = "skin"
 ITEM_KIND = "item"
+EXPERIENCE_BALL_KIND = "experience_ball"
 ITEM_QUALITIES = ("普通", "中级", "高级")
 QUALITY_RANK = {"UR": 5, "SSR": 4, "SR": 3, "R": 2, "N": 1, "普通": 1, "中级": 2, "高级": 3}
+FONT_FAMILIES = ("default", "msyh", "simhei", "simsun", "kaiti")
 DEFAULT_VISUAL_SETTINGS = {
     "companion_name_color": "#172033",
     "companion_meta_color": "#6d9bc6",
@@ -151,7 +153,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     },
 ]
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、星币、打卡与抽奖插件", "2.1.0")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡与抽奖插件", "2.2.0")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -159,17 +161,20 @@ class JubenNpcPlugin(Star):
         self.data_dir = self.plugin_dir / "data"
         self.assets_dir = self.data_dir / "npc_assets"
         self.checkin_assets_dir = self.data_dir / "checkin_assets"
+        self.status_assets_dir = self.data_dir / "status_assets"
         self.font_dir = self.data_dir / "fonts"
         self.render_dir = self.data_dir / "rendered"
         self.db_path = self.data_dir / "players.json"
         self.characters_path = self.data_dir / "characters.json"
         self.checkin_templates_path = self.data_dir / "checkin_templates.json"
+        self.status_templates_path = self.data_dir / "status_templates.json"
         self.settings_path = self.data_dir / "settings.json"
         self.db: Dict[str, Any] = {"scopes": {}}
         self.characters: List[Dict[str, Any]] = []
         self.checkin_templates: List[Dict[str, Any]] = []
+        self.status_templates: List[Dict[str, Any]] = []
         self.settings: Dict[str, str] = dict(DEFAULT_VISUAL_SETTINGS)
-        self._font_cache: Dict[Tuple[int, bool], ImageFont.FreeTypeFont] = {}
+        self._font_cache: Dict[Tuple[int, bool, str], ImageFont.FreeTypeFont] = {}
         self._warned_missing_font = False
         self._register_page_apis(context)
 
@@ -177,11 +182,13 @@ class JubenNpcPlugin(Star):
         self.data_dir.mkdir(exist_ok=True)
         self.assets_dir.mkdir(exist_ok=True)
         self.checkin_assets_dir.mkdir(exist_ok=True)
+        self.status_assets_dir.mkdir(exist_ok=True)
         self.font_dir.mkdir(exist_ok=True)
         self.render_dir.mkdir(exist_ok=True)
         self._load_db()
         self._load_characters()
         self._load_checkin_templates()
+        self._load_status_templates()
         self._load_settings()
         self._ensure_fonts()
         self._ensure_assets()
@@ -191,47 +198,62 @@ class JubenNpcPlugin(Star):
         self._save_db()
         self._save_characters()
         self._save_checkin_templates()
+        self._save_status_templates()
         self._save_settings()
 
     async def help_cmd(self, event: AstrMessageEvent):
         path = self._render_text_card(
             "剧本杀同伴数据库",
             [
-                "/打卡 - 每天随机领取 1-5 星币",
+                "打卡 - 直接触发，每天随机领取 1-5 星币",
                 "/赠送星币 @群友 数量 - 管理员发放星币",
                 "/赠送同伴 @群友 名称 - 管理员赠送同伴或皮肤",
                 "/赠送专属 @群友 同伴名 - 管理员赠送同伴专属物品",
-                "/状态栏 - 查看当前同伴状态",
+                "状态栏 - 直接触发，查看当前同伴状态",
                 "/切换同伴 名称 - 更换当前同伴或装备皮肤（/切换角色 仍兼容）",
-                "/抽奖 - 消耗 10 星币进行 5 抽",
+                "抽奖 - 直接触发，消耗 10 星币进行 5 抽",
                 "/中奖号码 - 机器人在固定范围内随机生成中奖号",
-                "/同伴栏 [页码] - 查看已获得同伴与皮肤",
-                "/道具栏 [页码] - 查看已获得道具",
+                "同伴栏 [页码] - 直接触发，查看已获得同伴与皮肤",
+                "道具栏 [页码] - 直接触发，查看已获得道具",
+                "使用道具名 - 消耗一个普通道具",
             ],
-            subtitle="后台 Plugin Page 可维护同伴、皮肤、道具、奖池、色板与打卡图片。",
+            subtitle="后台 Plugin Page 可维护同伴、皮肤、道具、经验球、奖池、模板、色板和玩家资产。",
         )
         yield event.image_result(str(path))
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=8)
     async def direct_command_cmd(self, event: AstrMessageEvent):
-        text = (event.message_str or "").strip().lstrip("/!！")
-        no_space_handlers = {
-            "切换同伴": self.switch_cmd,
-            "切换角色": self.switch_cmd,
-            "更换角色": self.switch_cmd,
-            "选择角色": self.switch_cmd,
+        """Handle the player's public commands before the message reaches the AI.
+
+        AstrBot's normal ``@filter.command`` path deliberately honours wake words.
+        This game instead promises five short commands that work as plain group
+        messages, so match *only* complete commands here.  Anchoring the match
+        prevents normal chat such as "今天打卡了" from being consumed.
+        """
+        text = (event.message_str or "").strip().lstrip("/!！").strip()
+        direct_handlers = {
+            "打卡": self.checkin_cmd,
             "抽奖": self.draw_cmd,
-            "npc抽奖": self.draw_cmd,
-            "NPC抽奖": self.draw_cmd,
-            "中奖号码": self.winning_number_cmd,
-            "开奖": self.winning_number_cmd,
+            "状态栏": self.status_cmd,
+            "同伴栏": self.inventory_cmd,
+            "道具栏": self.item_inventory_cmd,
         }
-        for prefix, handler in no_space_handlers.items():
-            if text.startswith(prefix) and text != prefix and not text[len(prefix): len(prefix) + 1].isspace():
-                async for result in handler(event):
-                    yield result
-                event.stop_event()
-                return
+        direct_match = re.fullmatch(r"(打卡|抽奖|状态栏|同伴栏|道具栏)(?:\s+.*)?", text)
+        if direct_match:
+            handler = direct_handlers[direct_match.group(1)]
+            async for result in handler(event):
+                yield result
+            event.stop_event()
+            return
+
+        # ``使用XXX`` is intentionally the one extra player action requested by
+        # the customer: it consumes a normal item and does not ask the AI to
+        # interpret a game effect.
+        if re.fullmatch(r"使用(?:道具)?\s*\S.*", text):
+            async for result in self.use_item_cmd(event):
+                yield result
+            event.stop_event()
+            return
 
     async def wallet_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
@@ -409,6 +431,11 @@ class JubenNpcPlugin(Star):
     @filter.command("抽奖", alias={"npc抽奖", "NPC抽奖"})
     async def draw_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
+        if not player.get("current_npc") or not player.get("npcs"):
+            yield event.image_result(
+                str(self._render_notice_card("无法抽奖", "你当前没有可获得经验的同伴，请先由管理员发放或通过活动获得同伴。"))
+            )
+            return
         count = DRAW_COUNT
         coin_cost = DRAW_COST
         pool_gaps = self._draw_pool_gaps()
@@ -457,6 +484,39 @@ class JubenNpcPlugin(Star):
         path = self._render_item_inventory(player, self._parse_page(event))
         yield event.image_result(str(path))
 
+    @filter.command("使用", alias={"使用道具"})
+    async def use_item_cmd(self, event: AstrMessageEvent):
+        """Consume one ordinary item held by the sender.
+
+        Item effects are deliberately display copy, not arbitrary executable
+        scripts.  This makes the requested `使用XXX` flow safe while still
+        keeping the inventory count accurate for the game master.
+        """
+        player = self._get_player(event)
+        item_name = self._arg_text(event)
+        item = self._find_item(item_name)
+        if not item:
+            yield event.image_result(str(self._render_notice_card("使用失败", f"没有找到道具：{item_name or '空'}。")))
+            return
+        result = self._consume_item(player, item["id"], 1)
+        if not result["removed"]:
+            yield event.image_result(str(self._render_notice_card("使用失败", f"你没有 {item['name']}，或数量不足。")))
+            return
+        self._save_db()
+        yield event.image_result(
+            str(
+                self._render_text_card(
+                    "道具已使用",
+                    [
+                        f"道具：{item['name']}",
+                        f"已消耗：1 个　剩余：{result['remaining']} 个",
+                        f"效果说明：{item.get('effect') or '暂未填写效果。'}",
+                    ],
+                    subtitle="道具已从你的道具栏扣除；具体游戏效果由剧本主持人按说明结算。",
+                )
+            )
+        )
+
     async def npc_info_cmd(self, event: AstrMessageEvent):
         yield event.image_result(
             str(self._render_notice_card("功能已整合", "NPC 信息已整合到 /状态栏 与 /同伴栏。"))
@@ -482,10 +542,19 @@ class JubenNpcPlugin(Star):
                         {
                             **template,
                             "preview": self._thumbnail_data_url(
-                                self.checkin_assets_dir / template.get("image", "")
+                                self.checkin_assets_dir / template.get("background_image", template.get("image", ""))
                             ),
                         }
                         for template in self.checkin_templates
+                    ],
+                    "status_templates": [
+                        {
+                            **template,
+                            "preview": self._thumbnail_data_url(
+                                self.status_assets_dir / template.get("background_image", template.get("image", ""))
+                            ),
+                        }
+                        for template in self.status_templates
                     ],
                 }
             )
@@ -544,6 +613,9 @@ class JubenNpcPlugin(Star):
         async def list_checkin_templates():
             return jsonify({"checkin_templates": self.checkin_templates})
 
+        async def list_status_templates():
+            return jsonify({"status_templates": self.status_templates})
+
         async def save_checkin_template():
             data = (await request.get_json()) or {}
             template = self._normalize_checkin_template(data)
@@ -563,6 +635,26 @@ class JubenNpcPlugin(Star):
                 self.checkin_templates = [self._default_checkin_template()]
             self._save_checkin_templates()
             return jsonify({"ok": True, "deleted": before != len(self.checkin_templates)})
+
+        async def save_status_template():
+            data = (await request.get_json()) or {}
+            template = self._normalize_status_template(data)
+            for index, item in enumerate(self.status_templates):
+                if item["id"] == template["id"]:
+                    self.status_templates[index] = template
+                    break
+            else:
+                self.status_templates.append(template)
+            self._save_status_templates()
+            return jsonify({"ok": True, "template": template})
+
+        async def delete_status_template(template_id: str):
+            before = len(self.status_templates)
+            self.status_templates = [item for item in self.status_templates if item["id"] != template_id]
+            if not self.status_templates:
+                self.status_templates = [self._default_status_template()]
+            self._save_status_templates()
+            return jsonify({"ok": True, "deleted": before != len(self.status_templates)})
 
         async def upload_checkin_background():
             file = await self._request_upload_file()
@@ -585,6 +677,48 @@ class JubenNpcPlugin(Star):
                 return jsonify({"status": "error", "message": str(exc)}), 400
             return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
 
+        async def upload_checkin_image():
+            file = await self._request_upload_file()
+            if file is None:
+                return jsonify({"status": "error", "message": "没有收到模板图片文件。"}), 400
+            try:
+                saved_name = await self._save_uploaded_image(file, self.checkin_assets_dir, "checkin_layer")
+            except Exception as exc:
+                logger.warning(f"打卡模板图片上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
+
+        async def upload_checkin_image_data_url():
+            try:
+                saved_name = await self._save_data_url_image(
+                    (await request.get_json()) or {}, self.checkin_assets_dir, "checkin_layer"
+                )
+            except Exception as exc:
+                logger.warning(f"打卡模板备用上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"checkin-assets/{saved_name}"})
+
+        async def upload_status_image():
+            file = await self._request_upload_file()
+            if file is None:
+                return jsonify({"status": "error", "message": "没有收到状态栏模板图片文件。"}), 400
+            try:
+                saved_name = await self._save_uploaded_image(file, self.status_assets_dir, "status_layer")
+            except Exception as exc:
+                logger.warning(f"状态栏模板图片上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"status-assets/{saved_name}"})
+
+        async def upload_status_image_data_url():
+            try:
+                saved_name = await self._save_data_url_image(
+                    (await request.get_json()) or {}, self.status_assets_dir, "status_layer"
+                )
+            except Exception as exc:
+                logger.warning(f"状态栏模板备用上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"status-assets/{saved_name}"})
+
         async def preview_checkin_template():
             data = (await request.get_json()) or {}
             template = self._normalize_checkin_template(data)
@@ -594,9 +728,30 @@ class JubenNpcPlugin(Star):
                 "coins": 128,
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "message": template.get("message") or "今日也要和同伴一起前进。",
+                "user_name": "示例玩家",
+                "user_id": "10001",
                 "_portrait_entry": self._companions()[0] if self._companions() else None,
             }
             img = self._compose_checkin_image(template, values)
+            return jsonify({"ok": True, "preview": self._image_data_url(img)})
+
+        async def preview_status_template():
+            data = (await request.get_json()) or {}
+            template = self._normalize_status_template(data)
+            character = self._companions()[0] if self._companions() else None
+            if not character:
+                return jsonify({"status": "error", "message": "请先至少保存一名同伴。"}), 400
+            player = {
+                "user_id": "10001",
+                "name": "示例玩家",
+                "coins": 128,
+                "npcs": {character["id"]: {"exp": 2600}},
+                "skins": {},
+                "items": {},
+                "current_npc": character["id"],
+                "current_skin": "",
+            }
+            img = self._compose_status_image(template, player, character, "效果预览")
             return jsonify({"ok": True, "preview": self._image_data_url(img)})
 
         async def grant_character():
@@ -606,12 +761,33 @@ class JubenNpcPlugin(Star):
             user_id = str(data.get("user_id", "")).strip()
             character_id = str(data.get("character_id", "")).strip()
             name = str(data.get("name", user_id)).strip() or user_id
-            if not scope_id or not user_id or not self._character_or_none(character_id):
+            entry = self._character_or_none(character_id)
+            if not scope_id or not user_id or not entry or entry.get("kind") == EXPERIENCE_BALL_KIND:
                 return jsonify({"status": "error", "message": "scope_id、user_id 或 character_id 无效。"}), 400
             player = self._get_player_by_scope(scope_id, user_id, name)
             created = self._grant_character(player, character_id)
             self._save_db()
             return jsonify({"ok": True, "created": created, "player": player})
+
+        async def revoke_character():
+            data = (await request.get_json()) or {}
+            scope_id = str(data.get("scope_id", "")).strip()
+            user_id = str(data.get("user_id", "")).strip()
+            character_id = str(data.get("character_id", "")).strip()
+            try:
+                amount = max(1, min(9999, int(data.get("amount", 1) or 1)))
+            except (TypeError, ValueError):
+                amount = 1
+            if not scope_id or not user_id or not self._character_or_none(character_id):
+                return jsonify({"status": "error", "message": "scope_id、user_id 或 character_id 无效。"}), 400
+            player = self._existing_player_by_scope(scope_id, user_id)
+            if player is None:
+                return jsonify({"status": "error", "message": "没有找到该群/会话中的玩家记录。"}), 404
+            result = self._revoke_character(player, character_id, amount)
+            if not result.get("removed"):
+                return jsonify({"status": "error", "message": result.get("message") or "玩家未拥有该资产。"}), 400
+            self._save_db()
+            return jsonify({"ok": True, "result": result, "player": player})
 
         async def grant_exclusive_item():
             data = (await request.get_json()) or {}
@@ -649,6 +825,12 @@ class JubenNpcPlugin(Star):
                 return jsonify({"status": "error", "message": "背景图片不存在。"}), 404
             return await send_file(path)
 
+        async def get_status_asset(filename: str):
+            path = self.status_assets_dir / Path(filename).name
+            if not path.exists():
+                return jsonify({"status": "error", "message": "状态栏模板图片不存在。"}), 404
+            return await send_file(path)
+
         context.register_web_api(f"/{PLUGIN_NAME}/characters", list_characters, ["GET"], "List NPC characters")
         context.register_web_api(f"/{PLUGIN_NAME}/characters", save_character, ["POST"], "Save NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/characters/<character_id>/delete", delete_character, ["POST"], "Delete NPC character")
@@ -659,13 +841,23 @@ class JubenNpcPlugin(Star):
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/<template_id>/delete", delete_checkin_template, ["POST"], "Delete check-in template")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-background", upload_checkin_background, ["POST"], "Upload check-in background")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-background/data-url", upload_checkin_background_data_url, ["POST"], "Upload check-in background fallback")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-image", upload_checkin_image, ["POST"], "Upload check-in template layer")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-checkin-image/data-url", upload_checkin_image_data_url, ["POST"], "Upload check-in template layer fallback")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-templates/preview", preview_checkin_template, ["POST"], "Preview check-in template")
+        context.register_web_api(f"/{PLUGIN_NAME}/status-templates", list_status_templates, ["GET"], "List status templates")
+        context.register_web_api(f"/{PLUGIN_NAME}/status-templates", save_status_template, ["POST"], "Save status template")
+        context.register_web_api(f"/{PLUGIN_NAME}/status-templates/<template_id>/delete", delete_status_template, ["POST"], "Delete status template")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-status-image", upload_status_image, ["POST"], "Upload status template layer")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-status-image/data-url", upload_status_image_data_url, ["POST"], "Upload status template layer fallback")
+        context.register_web_api(f"/{PLUGIN_NAME}/status-templates/preview", preview_status_template, ["POST"], "Preview status template")
         context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
+        context.register_web_api(f"/{PLUGIN_NAME}/revoke", revoke_character, ["POST"], "Revoke NPC character or item")
         context.register_web_api(f"/{PLUGIN_NAME}/grant-exclusive", grant_exclusive_item, ["POST"], "Grant companion exclusive item")
         context.register_web_api(f"/{PLUGIN_NAME}/settings", get_settings, ["GET"], "Get companion visual settings")
         context.register_web_api(f"/{PLUGIN_NAME}/settings", save_settings, ["POST"], "Save companion visual settings")
         context.register_web_api(f"/{PLUGIN_NAME}/assets/<filename>", get_asset, ["GET"], "Get NPC image")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-assets/<filename>", get_checkin_asset, ["GET"], "Get check-in background")
+        context.register_web_api(f"/{PLUGIN_NAME}/status-assets/<filename>", get_status_asset, ["GET"], "Get status template layer")
 
     def _load_db(self):
         if not self.db_path.exists():
@@ -812,9 +1004,20 @@ class JubenNpcPlugin(Star):
         return {
             "id": "default",
             "name": "同伴打卡样式",
+            "bound_entry_id": "",
+            "priority": 0,
+            "background_image": "",
+            "panel_image": "",
+            "portrait_frame_image": "",
+            # Keep the legacy field so existing WebUI clients and old JSON keep
+            # resolving their background after the schema upgrade.
             "image": "",
             "enabled": True,
             "show_companion": True,
+            "portrait_scale": 1.0,
+            "portrait_offset_x": 0.0,
+            "portrait_offset_y": 0.0,
+            "font_family": "default",
             "message": "今日也要和同伴一起前进。",
             "panel_color": "#152238",
             "texts": {
@@ -822,6 +1025,33 @@ class JubenNpcPlugin(Star):
                 "reward": {"text": "{reward}", "x": 0.08, "y": 0.30, "size": 0.042, "color": "#eaf4ff", "bold": True},
                 "coins": {"text": "当前星币：{coins}", "x": 0.08, "y": 0.41, "size": 0.038, "color": "#d7e6f5", "bold": False},
                 "message": {"text": "{message}", "x": 0.08, "y": 0.58, "size": 0.030, "color": "#c8d9ea", "bold": False},
+                "user": {"text": "打开者：{user_name}", "x": 0.08, "y": 0.70, "size": 0.027, "color": "#b8cadd", "bold": False},
+            },
+        }
+
+    def _default_status_template(self) -> Dict[str, Any]:
+        return {
+            "id": "default",
+            "name": "默认状态栏样式",
+            "bound_entry_id": "",
+            "priority": 0,
+            "background_image": "",
+            "panel_image": "",
+            "portrait_frame_image": "",
+            "image": "",
+            "enabled": True,
+            "show_companion": True,
+            "portrait_scale": 1.0,
+            "portrait_offset_x": 0.0,
+            "portrait_offset_y": 0.0,
+            "font_family": "default",
+            "panel_color": "#ffffff",
+            "texts": {
+                "user": {"text": "打开者：{user_name}｜ID：{user_id}", "x": 0.45, "y": 0.105, "size": 0.020, "color": "#6d9bc6", "bold": False},
+                "name": {"text": "{character_name}", "x": 0.441, "y": 0.190, "size": 0.042, "color": "#172033", "bold": True},
+                "subtitle": {"text": "{subtitle_name}  |  {quality}  |  {bonus}", "x": 0.441, "y": 0.265, "size": 0.020, "color": "#6d9bc6", "bold": True},
+                "stars": {"text": "{stars}", "x": 0.441, "y": 0.323, "size": 0.031, "color": "#f5b642", "bold": True},
+                "level": {"text": "Lv.{level}  {current}/{need} EXP", "x": 0.441, "y": 0.390, "size": 0.021, "color": "#6d9bc6", "bold": True},
             },
         }
 
@@ -844,28 +1074,90 @@ class JubenNpcPlugin(Star):
     def _save_checkin_templates(self):
         self._write_json_atomic(self.checkin_templates_path, {"templates": self.checkin_templates})
 
+    def _load_status_templates(self):
+        if not self.status_templates_path.exists():
+            self.status_templates = [self._default_status_template()]
+            self._save_status_templates()
+            return
+        try:
+            raw = json.loads(self.status_templates_path.read_text(encoding="utf-8"))
+            templates = raw.get("templates", raw) if isinstance(raw, dict) else raw
+            self.status_templates = [self._normalize_status_template(item) for item in templates if isinstance(item, dict)]
+        except Exception as exc:
+            logger.error(f"读取状态栏模板失败，将使用默认样式：{exc}")
+            self.status_templates = []
+        if not self.status_templates:
+            self.status_templates = [self._default_status_template()]
+        self._save_status_templates()
+
+    def _save_status_templates(self):
+        self._write_json_atomic(self.status_templates_path, {"templates": self.status_templates})
+
     def _normalize_checkin_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        base = self._default_checkin_template()
+        return self._normalize_visual_template(data, self._default_checkin_template())
+
+    def _normalize_status_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._normalize_visual_template(data, self._default_status_template())
+
+    def _normalize_visual_template(self, data: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
+        """Migrate and validate a role-bound card template without dropping text rows.
+
+        Earlier versions normalized only four hard-coded check-in rows.  That
+        silently discarded operator-created text such as tickets/probability.
+        Every valid text entry is now retained and rendered, including future
+        custom rows, while the known defaults remain available for new cards.
+        """
         template_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(data.get("id") or "").strip()).strip("_")
-        base["id"] = template_id or f"checkin_{int(datetime.now().timestamp())}"
+        prefix = "status" if "状态栏" in str(base.get("name") or "") else "checkin"
+        base["id"] = template_id or f"{prefix}_{int(datetime.now().timestamp())}"
         base["name"] = str(data.get("name") or base["name"]).strip()[:60]
-        base["image"] = Path(str(data.get("image") or "")).name
+        background = Path(str(data.get("background_image") or data.get("image") or "")).name
+        base["background_image"] = background
+        base["image"] = background
+        base["panel_image"] = Path(str(data.get("panel_image") or "")).name
+        base["portrait_frame_image"] = Path(str(data.get("portrait_frame_image") or "")).name
+        bound_entry_id = str(data.get("bound_entry_id") or data.get("bound_character_id") or "").strip()
+        bound = self._character_or_none(bound_entry_id)
+        base["bound_entry_id"] = bound_entry_id if bound and bound.get("kind") in {COMPANION_KIND, SKIN_KIND} else ""
+        try:
+            base["priority"] = max(-100, min(100, int(data.get("priority", base.get("priority", 0)) or 0)))
+        except (TypeError, ValueError):
+            base["priority"] = int(base.get("priority", 0) or 0)
         base["enabled"] = bool(data.get("enabled", True))
         base["show_companion"] = bool(data.get("show_companion", True))
-        base["message"] = str(data.get("message") or base["message"]).strip()[:180]
+        base["portrait_scale"] = self._template_number(data.get("portrait_scale"), base.get("portrait_scale", 1.0), 0.5, 1.5)
+        base["portrait_offset_x"] = self._template_number(data.get("portrait_offset_x"), base.get("portrait_offset_x", 0.0), -0.35, 0.35)
+        base["portrait_offset_y"] = self._template_number(data.get("portrait_offset_y"), base.get("portrait_offset_y", 0.0), -0.35, 0.35)
+        family = str(data.get("font_family") or base.get("font_family") or "default").strip().lower()
+        base["font_family"] = family if family in FONT_FAMILIES else "default"
+        if "message" in base or "message" in data:
+            base["message"] = str(data.get("message") or base.get("message") or "").strip()[:180]
         panel_color = str(data.get("panel_color") or base["panel_color"])
         base["panel_color"] = panel_color if re.fullmatch(r"#[0-9a-fA-F]{6}", panel_color) else base["panel_color"]
         raw_texts = data.get("texts") if isinstance(data.get("texts"), dict) else {}
-        for key, defaults in base["texts"].items():
+        normalized_texts: Dict[str, Dict[str, Any]] = {}
+        default_texts = base.get("texts", {})
+        keys = list(default_texts)
+        keys.extend(key for key in raw_texts if key not in default_texts)
+        for key in keys:
+            safe_key = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(key)).strip("_")[:40]
+            if not safe_key:
+                continue
+            defaults = default_texts.get(key, {"text": "", "x": 0.08, "y": 0.72, "size": 0.03, "color": "#ffffff", "bold": False})
             source = raw_texts.get(key) if isinstance(raw_texts.get(key), dict) else {}
-            if "text" in source:
-                defaults["text"] = str(source.get("text") or "")[:180]
-            defaults["x"] = self._template_number(source.get("x"), defaults["x"], 0, 1)
-            defaults["y"] = self._template_number(source.get("y"), defaults["y"], 0, 1)
-            defaults["size"] = self._template_number(source.get("size"), defaults["size"], 0.015, 0.15)
-            color = str(source.get("color") or defaults["color"])
-            defaults["color"] = color if re.fullmatch(r"#[0-9a-fA-F]{6}", color) else defaults["color"]
-            defaults["bold"] = bool(source.get("bold", defaults["bold"]))
+            text = str(source.get("text", defaults.get("text", "")) or "")[:180]
+            color = str(source.get("color") or defaults.get("color", "#ffffff"))
+            item_family = str(source.get("font_family") or base["font_family"] or "default").lower()
+            normalized_texts[safe_key] = {
+                "text": text,
+                "x": self._template_number(source.get("x"), float(defaults.get("x", 0.08)), 0, 1),
+                "y": self._template_number(source.get("y"), float(defaults.get("y", 0.72)), 0, 1),
+                "size": self._template_number(source.get("size"), float(defaults.get("size", 0.03)), 0.015, 0.15),
+                "color": color if re.fullmatch(r"#[0-9a-fA-F]{6}", color) else str(defaults.get("color", "#ffffff")),
+                "bold": bool(source.get("bold", defaults.get("bold", False))),
+                "font_family": item_family if item_family in FONT_FAMILIES else base["font_family"],
+            }
+        base["texts"] = normalized_texts
         return base
 
     @staticmethod
@@ -904,9 +1196,14 @@ class JubenNpcPlugin(Star):
         self._write_json_atomic(self.characters_path, payload)
 
     def _normalize_character(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize companions, skins and items while retaining legacy character JSON."""
+        """Normalize library entries while retaining legacy character JSON.
+
+        Experience balls intentionally live in the library but are not player
+        assets.  They are a separate reward kind so a draw can add EXP directly
+        without ever creating an item-inventory record.
+        """
         raw_kind = str(data.get("kind") or data.get("type") or COMPANION_KIND).lower()
-        kind = raw_kind if raw_kind in {COMPANION_KIND, SKIN_KIND, ITEM_KIND} else COMPANION_KIND
+        kind = raw_kind if raw_kind in {COMPANION_KIND, SKIN_KIND, ITEM_KIND, EXPERIENCE_BALL_KIND} else COMPANION_KIND
         name = str(data.get("name") or data.get("id") or "未命名同伴").strip()
         character_id = self._slug(str(data.get("id") or name))
         quality = str(data.get("quality") or data.get("star") or ("普通" if kind == ITEM_KIND else "R")).strip().upper()
@@ -920,6 +1217,22 @@ class JubenNpcPlugin(Star):
         if not isinstance(colors, list) or len(colors) < 3:
             colors = ["#6c8cff", "#f4d35e", "#10172a"]
         image = Path(str(data.get("image") or f"{character_id}.png").strip()).name
+
+        if kind == EXPERIENCE_BALL_KIND:
+            return {
+                "id": character_id,
+                "kind": EXPERIENCE_BALL_KIND,
+                "name": name,
+                "english_name": str(data.get("english_name") or "").strip(),
+                "quality": str(data.get("quality") or "经验球").strip()[:20] or "经验球",
+                "exp_amount": int(self._template_number(data.get("exp_amount"), 10, 1, 999999)),
+                "draw_weight": int(self._template_number(data.get("draw_weight"), 10, 1, 1000)),
+                "image": image,
+                "in_pool": bool(data.get("in_pool", data.get("featured", True))),
+                "focal_x": self._template_number(data.get("focal_x"), 0.5, 0, 1),
+                "focal_y": self._template_number(data.get("focal_y"), 0.5, 0, 1),
+                "colors": [str(colors[0]), str(colors[1]), str(colors[2])],
+            }
 
         if kind == ITEM_KIND:
             pool_tier = str(data.get("pool_tier") or data.get("tier") or quality).strip()
@@ -1138,6 +1451,10 @@ class JubenNpcPlugin(Star):
             "items": {},
             "exclusive_items": {},
             "current_skin": "",
+            # New accounts receive a starter companion.  Administrators may
+            # later remove even that last asset; this marker prevents the
+            # migration routine from silently granting it back.
+            "allow_empty_npcs": False,
             "draw_state": {"pity_count": 0, "next_pity_kind": "random"},
         }
 
@@ -1146,6 +1463,26 @@ class JubenNpcPlugin(Star):
 
     def _get_player_by_id(self, event: AstrMessageEvent, user_id: str, name: str) -> Dict[str, Any]:
         return self._get_player_by_scope(self._scope_id(event), user_id, name)
+
+    def _existing_player_by_scope(self, scope_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """Find an existing player without accidentally creating an account.
+
+        A destructive WebUI request with a mistyped QQ must not leave behind a
+        new starter player, which is why revoke uses this instead of the normal
+        get-or-create path.
+        """
+        scope = self.db.get("scopes", {}).get(str(scope_id))
+        if not isinstance(scope, dict):
+            return None
+        players = scope.get("players")
+        if not isinstance(players, dict):
+            return None
+        player = players.get(str(user_id))
+        if not isinstance(player, dict):
+            return None
+        # Reuse the canonical migration/default logic now that existence has
+        # already been proved.
+        return self._get_player_by_scope(scope_id, str(user_id), str(player.get("name") or user_id))
 
     def _get_player_by_scope(self, scope_id: str, user_id: str, name: str) -> Dict[str, Any]:
         players = self._db_scope(scope_id).setdefault("players", {})
@@ -1158,12 +1495,13 @@ class JubenNpcPlugin(Star):
         player.setdefault("items", {})
         player.setdefault("exclusive_items", {})
         player.setdefault("current_skin", "")
+        player.setdefault("allow_empty_npcs", False)
         player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random"})
         self._migrate_player_npcs(player)
-        if not player["npcs"]:
+        if not player["npcs"] and not player.get("allow_empty_npcs"):
             starter = "rin" if self._character_or_none("rin") else self._companions()[0]["id"]
             player["npcs"][starter] = {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}
-        player.setdefault("current_npc", next(iter(player["npcs"])))
+        player.setdefault("current_npc", next(iter(player["npcs"]), ""))
         current = self._character_or_none(str(player.get("current_npc") or ""))
         if player["current_npc"] not in player["npcs"] or not current or current.get("kind") != COMPANION_KIND:
             player["current_npc"] = next(
@@ -1171,7 +1509,7 @@ class JubenNpcPlugin(Star):
                     character_id for character_id in player["npcs"]
                     if (entry := self._character_or_none(character_id)) and entry.get("kind") == COMPANION_KIND
                 ),
-                self._companions()[0]["id"],
+                "",
             )
         skin = self._character_or_none(str(player.get("current_skin") or ""))
         if not skin or skin.get("kind") != SKIN_KIND or skin["id"] not in player["skins"] or skin.get("parent_id") != player["current_npc"]:
@@ -1307,6 +1645,12 @@ class JubenNpcPlugin(Star):
     def _items(self) -> List[Dict[str, Any]]:
         return [item for item in self.characters if item.get("kind") == ITEM_KIND]
 
+    def _experience_balls(self) -> List[Dict[str, Any]]:
+        return [
+            item for item in self.characters
+            if item.get("kind") == EXPERIENCE_BALL_KIND and item.get("in_pool", False)
+        ]
+
     def _owns_entry(self, player: Dict[str, Any], entry: Dict[str, Any]) -> bool:
         kind = entry.get("kind")
         if kind == COMPANION_KIND:
@@ -1339,6 +1683,20 @@ class JubenNpcPlugin(Star):
                 return character
         return None
 
+    def _find_item(self, value: str) -> Optional[Dict[str, Any]]:
+        """Look up only a normal consumable item, never a character or EXP ball."""
+        value = (value or "").strip()
+        if not value:
+            return None
+        if (entry := self._character_or_none(value)) and entry.get("kind") == ITEM_KIND:
+            return entry
+        lowered = value.lower()
+        items = self._items()
+        for item in items:
+            if lowered in {str(item.get("name") or "").lower(), str(item.get("english_name") or "").lower()}:
+                return item
+        return next((item for item in items if lowered in str(item.get("name") or "").lower()), None)
+
     def _grant_character(self, player: Dict[str, Any], character_id: str) -> bool:
         entry = self._character_or_none(character_id)
         if not entry:
@@ -1353,10 +1711,66 @@ class JubenNpcPlugin(Star):
             item = player["items"].setdefault(entry["id"], {"count": 0, "owned_at": now})
             item["count"] = int(item.get("count", 0) or 0) + 1
             return True
+        if entry.get("kind") == EXPERIENCE_BALL_KIND:
+            # Experience balls are draw rewards only and must never enter a
+            # player's normal inventory through an accidental backend grant.
+            return False
         if entry["id"] in player["npcs"]:
             return False
         player["npcs"][entry["id"]] = {"exp": 0, "owned_at": now, "full_at": ""}
+        player["allow_empty_npcs"] = False
         return True
+
+    def _consume_item(self, player: Dict[str, Any], item_id: str, amount: int = 1) -> Dict[str, Any]:
+        amount = max(1, int(amount or 1))
+        items = player.setdefault("items", {})
+        record = items.get(item_id)
+        available = int(record.get("count", 0) or 0) if isinstance(record, dict) else 0
+        if available < amount:
+            return {"removed": 0, "remaining": available}
+        remaining = available - amount
+        if remaining:
+            record["count"] = remaining
+        else:
+            items.pop(item_id, None)
+        return {"removed": amount, "remaining": remaining}
+
+    def _revoke_character(self, player: Dict[str, Any], character_id: str, amount: int = 1) -> Dict[str, Any]:
+        """Remove an owned companion, skin or item without touching the master library."""
+        entry = self._character_or_none(character_id)
+        if not entry or entry.get("kind") == EXPERIENCE_BALL_KIND:
+            return {"removed": 0, "remaining": 0, "message": "条目不存在或不是可发放资产。"}
+        kind = entry.get("kind")
+        if kind == ITEM_KIND:
+            result = self._consume_item(player, entry["id"], amount)
+            result["message"] = "道具数量不足。" if not result["removed"] else "道具已扣除。"
+            return result
+        if kind == SKIN_KIND:
+            if entry["id"] not in player.get("skins", {}):
+                return {"removed": 0, "remaining": 0, "message": "玩家未拥有该皮肤。"}
+            player["skins"].pop(entry["id"], None)
+            if player.get("current_skin") == entry["id"]:
+                player["current_skin"] = ""
+            return {"removed": 1, "remaining": 0, "message": "皮肤已扣除。"}
+        if entry["id"] not in player.get("npcs", {}):
+            return {"removed": 0, "remaining": 0, "message": "玩家未拥有该同伴。"}
+        player["npcs"].pop(entry["id"], None)
+        player.setdefault("exclusive_items", {}).pop(entry["id"], None)
+        if player.get("current_npc") == entry["id"]:
+            player["current_skin"] = ""
+            remaining_id = next(
+                (
+                    npc_id for npc_id in player.get("npcs", {})
+                    if (npc := self._character_or_none(npc_id)) and npc.get("kind") == COMPANION_KIND
+                ),
+                "",
+            )
+            player["current_npc"] = remaining_id
+        if not player.get("npcs"):
+            player["allow_empty_npcs"] = True
+            player["current_npc"] = ""
+            player["current_skin"] = ""
+        return {"removed": 1, "remaining": len(player.get("npcs", {})), "message": "同伴已扣除。"}
 
     def _exclusive_item_names(self, companion: Optional[Dict[str, Any]]) -> List[str]:
         if not companion or companion.get("kind") != COMPANION_KIND:
@@ -1407,15 +1821,20 @@ class JubenNpcPlugin(Star):
     def _npc_exp(self, player: Dict[str, Any], character_id: str) -> int:
         return int(player["npcs"].get(character_id, {}).get("exp", 0))
 
-    def _add_exp(self, player: Dict[str, Any], character_id: str, exp: int):
-        if character_id not in player["npcs"]:
-            self._grant_character(player, character_id)
+    def _add_exp(self, player: Dict[str, Any], character_id: str, exp: int) -> int:
+        entry = self._character_or_none(character_id)
+        if not entry or entry.get("kind") != COMPANION_KIND:
+            return 0
+        if character_id not in player["npcs"] and not self._grant_character(player, character_id):
+            return 0
         record = player["npcs"][character_id]
         before = int(record.get("exp", 0) or 0)
-        record["exp"] = before + max(0, int(exp))
+        granted = max(0, int(exp))
+        record["exp"] = before + granted
         full_exp = sum(LEVEL_REQUIREMENTS)
         if before < full_exp <= record["exp"] and not record.get("full_at"):
             record["full_at"] = datetime.now().isoformat(timespec="seconds")
+        return granted
 
     def _level_info(self, exp: int) -> Tuple[int, int, int, float]:
         spent = 0
@@ -1433,7 +1852,7 @@ class JubenNpcPlugin(Star):
             "切换同伴", "切换角色", "更换角色", "选择角色", "NPC信息", "npc信息", "查询NPC",
             "角色信息", "每日打卡", "我的星币", "NPC仓库", "npc仓库", "我的NPC",
             "状态栏", "角色状态", "抽奖", "npc抽奖", "NPC抽奖", "星币", "钱包",
-            "中奖号码", "开奖", "打卡", "查NPC", "同伴栏", "物品栏", "道具栏", "我的道具", "道具仓库",
+            "中奖号码", "开奖", "打卡", "查NPC", "同伴栏", "物品栏", "道具栏", "我的道具", "道具仓库", "使用道具", "使用",
         ]
         for prefix in sorted(command_prefixes, key=len, reverse=True):
             if text.startswith(prefix):
@@ -1562,6 +1981,39 @@ class JubenNpcPlugin(Star):
         """Compatibility name: return only entries explicitly enabled in the current pool."""
         return self._draw_pool(COMPANION_KIND) + self._draw_pool(SKIN_KIND)
 
+    def _roll_experience_ball(self, player: Dict[str, Any], current_id: str) -> Dict[str, Any]:
+        """Resolve the fixed experience-ball reward slot without touching inventory.
+
+        Operators can add any number of independently weighted balls in the
+        library.  Older installs without custom balls retain the original three
+        rewards so an update never creates an empty 75% reward bracket.
+        """
+        configured = self._experience_balls()
+        if configured:
+            weights = [max(1, int(entry.get("draw_weight", 1) or 1)) for entry in configured]
+            entry = random.choices(configured, weights=weights, k=1)[0]
+            exp = self._add_exp(player, current_id, int(entry.get("exp_amount", 0) or 0))
+            return {
+                "kind": "经验球",
+                "name": entry["name"],
+                "exp": exp,
+                "character_id": current_id,
+                "entry_id": entry["id"],
+                "entry_kind": EXPERIENCE_BALL_KIND,
+                "image": entry.get("image", ""),
+            }
+        legacy_weights = [rate for rate, _, _, _ in EXPERIENCE_BALLS]
+        _, name, exp, image = random.choices(EXPERIENCE_BALLS, weights=legacy_weights, k=1)[0]
+        granted = self._add_exp(player, current_id, exp)
+        return {
+            "kind": "经验球",
+            "name": name,
+            "exp": granted,
+            "character_id": current_id,
+            "entry_kind": EXPERIENCE_BALL_KIND,
+            "image": image,
+        }
+
     def _grant_draw_entry(self, player: Dict[str, Any], entry: Dict[str, Any], label: str) -> Dict[str, Any]:
         current_id = player.get("current_npc", self._companions()[0]["id"])
         # Items are stackable inventory.  A duplicate draw must grant another
@@ -1628,11 +2080,12 @@ class JubenNpcPlugin(Star):
 
         roll = random.random() * 100
         cursor = 0.0
-        for rate, name, exp, image in EXPERIENCE_BALLS:
-            cursor += rate
-            if roll < cursor:
-                self._add_exp(player, current_id, exp)
-                return {"kind": "经验球", "name": name, "exp": exp, "character_id": current_id, "entry_kind": "experience", "image": image}
+        # Keep the original 75% experience-ball bracket.  Custom balls change
+        # only which ball is selected inside that bracket, not the published
+        # odds of the other reward classes.
+        cursor += sum(rate for rate, _, _, _ in EXPERIENCE_BALLS)
+        if roll < cursor:
+            return self._roll_experience_ball(player, current_id)
 
         for rate, tier in ((6, "普通"), (4, "中级"), (3, "高级")):
             cursor += rate
@@ -1808,9 +2261,24 @@ class JubenNpcPlugin(Star):
                     path.unlink(missing_ok=True)
                 logger.error(f"下载中文字体失败：{filename}，原因：{exc}")
 
-    def _find_font_file(self, bold: bool = False) -> Optional[Path]:
+    def _find_font_file(self, bold: bool = False, family: str = "default") -> Optional[Path]:
+        family = str(family or "default").lower()
+        if family not in FONT_FAMILIES:
+            family = "default"
         local_bold = [self.font_dir / "NotoSansCJKsc-Bold.otf", self.font_dir / "SourceHanSansSC-Bold.otf"]
         local_regular = [self.font_dir / "NotoSansCJKsc-Regular.otf", self.font_dir / "SourceHanSansSC-Regular.otf"]
+        family_bold = {
+            "msyh": [Path("C:/Windows/Fonts/msyhbd.ttc"), Path("C:/Windows/Fonts/msyh.ttc")],
+            "simhei": [Path("C:/Windows/Fonts/simhei.ttf")],
+            "simsun": [Path("C:/Windows/Fonts/simsun.ttc")],
+            "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
+        }
+        family_regular = {
+            "msyh": [Path("C:/Windows/Fonts/msyh.ttc"), Path("C:/Windows/Fonts/msyhbd.ttc")],
+            "simhei": [Path("C:/Windows/Fonts/simhei.ttf")],
+            "simsun": [Path("C:/Windows/Fonts/simsun.ttc")],
+            "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
+        }
         system_bold = [
             Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
             Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc"),
@@ -1828,7 +2296,8 @@ class JubenNpcPlugin(Star):
             Path("C:/Windows/Fonts/simsun.ttc"),
         ]
 
-        candidates = (local_bold + system_bold if bold else local_regular + system_regular)
+        preferred = family_bold.get(family, []) if bold else family_regular.get(family, [])
+        candidates = preferred + (local_bold + system_bold if bold else local_regular + system_regular)
         if bold:
             candidates += local_regular + system_regular
 
@@ -1840,12 +2309,15 @@ class JubenNpcPlugin(Star):
                 return font_path
         return None
 
-    def _font(self, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-        cache_key = (size, bold)
+    def _font(self, size: int, bold: bool = False, family: str = "default") -> ImageFont.FreeTypeFont:
+        family = str(family or "default").lower()
+        if family not in FONT_FAMILIES:
+            family = "default"
+        cache_key = (size, bold, family)
         if cache_key in self._font_cache:
             return self._font_cache[cache_key]
 
-        font_path = self._find_font_file(bold)
+        font_path = self._find_font_file(bold, family)
         if font_path:
             font = ImageFont.truetype(str(font_path), size)
             self._font_cache[cache_key] = font
@@ -1987,18 +2459,146 @@ class JubenNpcPlugin(Star):
         img.save(path)
         return path
 
+    def _select_role_template(
+        self,
+        templates: List[Dict[str, Any]],
+        player: Dict[str, Any],
+        companion_id: str,
+        fallback: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Choose a deterministic template: equipped skin → companion → general.
+
+        This replaces the old global random check-in choice.  An operator can
+        therefore design a card once for a particular skin/companion and be
+        certain it is the card emitted after a player switches to it.
+        """
+        enabled = [item for item in templates if item.get("enabled")]
+        candidates = enabled or templates
+        if not candidates:
+            return fallback
+        skin = self._active_skin(player, companion_id) if companion_id else None
+        targets = [skin["id"]] if skin else []
+        if companion_id:
+            targets.append(companion_id)
+        targets.append("")
+        for target in targets:
+            matches = [item for item in candidates if str(item.get("bound_entry_id") or "") == target]
+            if matches:
+                return sorted(matches, key=lambda item: (-int(item.get("priority", 0) or 0), str(item.get("id") or "")))[0]
+        return sorted(candidates, key=lambda item: (-int(item.get("priority", 0) or 0), str(item.get("id") or "")))[0]
+
+    @staticmethod
+    def _template_color(value: Any, fallback: str) -> str:
+        value = str(value or fallback)
+        return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else fallback
+
+    def _composite_template_layer(
+        self,
+        canvas: Image.Image,
+        assets_dir: Path,
+        filename: str,
+        target_box: Tuple[int, int, int, int],
+    ) -> bool:
+        """Apply a transparent template layer either as a full canvas or a block.
+
+        Designers may upload a 1280-wide transparent overlay (maximum control)
+        or a smaller left/right panel asset.  Full-canvas art is placed exactly
+        over the card; smaller art is contained and centered in its matching
+        block without flattening PNG alpha.
+        """
+        path = assets_dir / Path(str(filename or "")).name
+        if not path.is_file():
+            return False
+        try:
+            with Image.open(path) as opened:
+                layer = ImageOps.exif_transpose(opened).convert("RGBA")
+            full_w, full_h = canvas.size
+            source_ratio = layer.width / max(1, layer.height)
+            full_ratio = full_w / max(1, full_h)
+            if abs(source_ratio - full_ratio) / full_ratio <= 0.05:
+                if layer.size != canvas.size:
+                    layer = layer.resize(canvas.size, Image.Resampling.LANCZOS)
+                canvas.alpha_composite(layer, (0, 0))
+                return True
+            x, y, width, height = target_box
+            layer.thumbnail((max(1, width), max(1, height)), Image.Resampling.LANCZOS)
+            canvas.alpha_composite(layer, (x + (width - layer.width) // 2, y + (height - layer.height) // 2))
+            return True
+        except Exception as exc:
+            logger.warning(f"读取模板图层失败：{path.name}，原因：{exc}")
+            return False
+
+    def _composite_template_portrait(
+        self,
+        canvas: Image.Image,
+        entry: Dict[str, Any],
+        base_size: Tuple[int, int],
+        origin: Tuple[int, int],
+        template: Dict[str, Any],
+        radius: int,
+    ) -> None:
+        scale = self._template_number(template.get("portrait_scale"), 1.0, 0.5, 1.5)
+        width = max(1, round(base_size[0] * scale))
+        height = max(1, round(base_size[1] * scale))
+        portrait = self._portrait(entry, (width, height))
+        # Preserve transparent PNG edges and combine them with the optional
+        # rounded clipping mask instead of replacing alpha via putalpha(mask).
+        alpha = portrait.getchannel("A")
+        mask = Image.new("L", portrait.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, width - 1, height - 1), radius=max(0, round(radius * scale)), fill=255)
+        portrait.putalpha(ImageChops.multiply(alpha, mask))
+        offset_x = int(self._template_number(template.get("portrait_offset_x"), 0, -0.35, 0.35) * base_size[0])
+        offset_y = int(self._template_number(template.get("portrait_offset_y"), 0, -0.35, 0.35) * base_size[1])
+        x = origin[0] + (base_size[0] - width) // 2 + offset_x
+        y = origin[1] + (base_size[1] - height) // 2 + offset_y
+        canvas.alpha_composite(portrait, (x, y))
+
+    def _draw_template_texts(
+        self,
+        draw: ImageDraw.ImageDraw,
+        template: Dict[str, Any],
+        values: Dict[str, Any],
+        size: Tuple[int, int],
+        keys: Optional[List[str]] = None,
+    ) -> None:
+        texts = template.get("texts", {})
+        if not isinstance(texts, dict):
+            return
+        entries = ((key, texts.get(key)) for key in keys) if keys else texts.items()
+        for _, item in entries:
+            if not isinstance(item, dict):
+                continue
+            text = self._format_template_text(str(item.get("text") or ""), values)
+            if not text:
+                continue
+            font_size = max(14, int(float(item.get("size", 0.04)) * size[0]))
+            family = str(item.get("font_family") or template.get("font_family") or "default")
+            font = self._font(font_size, bool(item.get("bold")), family)
+            x = int(float(item.get("x", 0)) * size[0])
+            y = int(float(item.get("y", 0)) * size[1])
+            color = self._template_color(item.get("color"), "#ffffff")
+            draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 130))
+            draw.text((x, y), text, font=font, fill=color)
+
     def _render_checkin_card(self, player: Dict[str, Any], title: str, reward: str, today: str = "") -> Path:
-        """Render a full-bleed 16:9 check-in card with an optional large companion portrait."""
-        enabled = [item for item in self.checkin_templates if item.get("enabled")]
-        template = random.choice(enabled or self.checkin_templates or [self._default_checkin_template()])
-        companion = self._character(player.get("current_npc", ""))
-        skin = self._active_skin(player, companion["id"])
+        """Render a full-bleed 16:9 check-in card using its role-bound template."""
+        companion = self._character_or_none(str(player.get("current_npc") or ""))
+        companion_id = companion["id"] if companion else ""
+        template = self._select_role_template(
+            self.checkin_templates,
+            player,
+            companion_id,
+            self._default_checkin_template(),
+        )
+        skin = self._active_skin(player, companion_id) if companion else None
         values = {
             "title": title,
             "reward": reward,
             "coins": player.get("coins", 0),
             "date": today or datetime.now().strftime("%Y-%m-%d"),
             "message": template.get("message") or "今日也要和同伴一起前进。",
+            "user_name": str(player.get("name") or player.get("user_id") or "玩家"),
+            "user_id": str(player.get("user_id") or ""),
             "_portrait_entry": skin or companion,
         }
         img = self._compose_checkin_image(template, values)
@@ -2007,41 +2607,33 @@ class JubenNpcPlugin(Star):
         return path
 
     def _compose_checkin_image(self, template: Dict[str, Any], values: Dict[str, Any]) -> Image.Image:
-        """Compose one template so WebUI preview and QQ output share exactly the same renderer."""
+        """Compose one check-in template for both WebUI preview and QQ output."""
         size = (1280, 720)
-        image_name = str(template.get("image") or "")
-        background_path = self.checkin_assets_dir / Path(image_name).name
-        if image_name and background_path.exists():
+        background_name = str(template.get("background_image") or template.get("image") or "")
+        background_path = self.checkin_assets_dir / Path(background_name).name
+        if background_name and background_path.exists():
             img = self._cover_image(background_path, size)
         else:
             img = self._gradient(size, "#18243c", "#2f6b6d").convert("RGBA")
-
         draw = ImageDraw.Draw(img)
-        panel_color = str(template.get("panel_color") or "#152238")
-        if not re.fullmatch(r"#[0-9a-fA-F]{6}", panel_color):
-            panel_color = "#152238"
-        rgb = Image.new("RGB", (1, 1), panel_color).getpixel((0, 0))
-        draw.rounded_rectangle((48, 56, 710, 664), radius=30, fill=rgb + (205,))
+        panel_box = (48, 56, 662, 608)
+        portrait_box = (748, 46, 480, 630)
+        panel_image = str(template.get("panel_image") or "")
+        frame_image = str(template.get("portrait_frame_image") or "")
+        if not panel_image:
+            panel_color = self._template_color(template.get("panel_color"), "#152238")
+            rgb = Image.new("RGB", (1, 1), panel_color).getpixel((0, 0))
+            draw.rounded_rectangle((48, 56, 710, 664), radius=30, fill=rgb + (205,))
         portrait_entry = values.get("_portrait_entry")
         if template.get("show_companion", True) and isinstance(portrait_entry, dict):
-            portrait = self._portrait(portrait_entry, (480, 630))
-            mask = Image.new("L", (480, 630), 0)
-            ImageDraw.Draw(mask).rounded_rectangle((0, 0, 479, 629), radius=28, fill=255)
-            portrait.putalpha(mask)
-            img.alpha_composite(portrait, (748, 46))
-            draw.rounded_rectangle((748, 46, 1228, 676), radius=28, outline=(255, 255, 255, 185), width=3)
-        for item in template.get("texts", {}).values():
-            text = self._format_template_text(str(item.get("text") or ""), values)
-            if not text:
-                continue
-            font_size = max(14, int(float(item.get("size", 0.04)) * size[0]))
-            font = self._font(font_size, bool(item.get("bold")))
-            x = int(float(item.get("x", 0)) * size[0])
-            y = int(float(item.get("y", 0)) * size[1])
-            color = item.get("color", "#ffffff")
-            # A small shadow keeps text readable on user-supplied art without adding borders or panels.
-            draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 130))
-            draw.text((x, y), text, font=font, fill=color)
+            self._composite_template_portrait(img, portrait_entry, (480, 630), (748, 46), template, 28)
+            if not frame_image:
+                draw.rounded_rectangle((748, 46, 1228, 676), radius=28, outline=(255, 255, 255, 185), width=3)
+        if panel_image:
+            self._composite_template_layer(img, self.checkin_assets_dir, panel_image, panel_box)
+        if frame_image:
+            self._composite_template_layer(img, self.checkin_assets_dir, frame_image, portrait_box)
+        self._draw_template_texts(draw, template, values, size)
         return img
 
     @staticmethod
@@ -2066,50 +2658,98 @@ class JubenNpcPlugin(Star):
         return resized.crop((left, top, left + size[0], top + size[1]))
 
     def _render_status(self, player: Dict[str, Any], character: Dict[str, Any], banner: str = "") -> Path:
+        template = self._select_role_template(
+            self.status_templates,
+            player,
+            character["id"],
+            self._default_status_template(),
+        )
+        img = self._compose_status_image(template, player, character, banner)
         path = self.render_dir / f"status_{player['user_id']}_{character['id']}.png"
+        img.save(path)
+        return path
+
+    def _compose_status_image(
+        self,
+        template: Dict[str, Any],
+        player: Dict[str, Any],
+        character: Dict[str, Any],
+        banner: str = "",
+    ) -> Image.Image:
+        """Compose a role-bound status card with the established left/right layout."""
+        size = (1280, 840)
         main, _, dark = character["colors"]
         skin = self._active_skin(player, character["id"])
         visual = skin or character
-        name_color = self.settings["status_name_color"]
-        meta_color = self.settings["status_meta_color"]
-        panel_color = self.settings["status_panel_color"]
-        img = self._gradient((1280, 840), dark, panel_color).convert("RGBA")
+        panel_color = self._template_color(template.get("panel_color"), self.settings["status_panel_color"])
+        background_name = str(template.get("background_image") or template.get("image") or "")
+        background_path = self.status_assets_dir / Path(background_name).name
+        if background_name and background_path.exists():
+            img = self._cover_image(background_path, size)
+        else:
+            img = self._gradient(size, dark, panel_color).convert("RGBA")
         draw = ImageDraw.Draw(img)
-        img.alpha_composite(self._portrait(visual, (520, 730)), (55, 70))
-        panel_rgb = Image.new("RGB", (1, 1), panel_color).getpixel((0, 0))
-        draw.rounded_rectangle((530, 70, 1215, 805), radius=24, fill=panel_rgb + (235,))
-
-        if banner:
-            draw.rounded_rectangle((565, 95, 845, 142), radius=18, fill=main)
-            draw.text((588, 103), banner, font=self._font(24, True), fill="white")
+        panel_box = (530, 70, 685, 735)
+        portrait_box = (55, 70, 520, 730)
+        panel_image = str(template.get("panel_image") or "")
+        frame_image = str(template.get("portrait_frame_image") or "")
+        if not panel_image:
+            panel_rgb = Image.new("RGB", (1, 1), panel_color).getpixel((0, 0))
+            draw.rounded_rectangle((530, 70, 1215, 805), radius=24, fill=panel_rgb + (235,))
+        if template.get("show_companion", True):
+            self._composite_template_portrait(img, visual, (520, 730), (55, 70), template, 24)
+        if panel_image:
+            self._composite_template_layer(img, self.status_assets_dir, panel_image, panel_box)
+        if frame_image:
+            self._composite_template_layer(img, self.status_assets_dir, frame_image, portrait_box)
 
         exp = self._npc_exp(player, character["id"])
         level, current, need, ratio = self._level_info(exp)
-        display_name = character["name"]
         subtitle_name = (skin or character).get("english_name") or (skin or character).get("name")
         quality = (skin or character).get("quality") or character.get("star", "R")
-        draw.text((565, 160), display_name, font=self._font(54, True), fill=name_color)
-        draw.text((565, 222), f"{subtitle_name}  |  {quality}  |  {character['bonus']}", font=self._font(25, True), fill=meta_color)
-        stars = "★" * level + "☆" * (5 - level)
-        draw.text((565, 272), stars, font=self._font(40, True), fill="#f5b642")
-        draw.text((565, 328), f"Lv.{level}  {current}/{need} EXP", font=self._font(26, True), fill=meta_color)
+        values = {
+            "user_name": str(player.get("name") or player.get("user_id") or "玩家"),
+            "user_id": str(player.get("user_id") or ""),
+            "character_name": character["name"],
+            "subtitle_name": subtitle_name,
+            "quality": quality,
+            "bonus": character.get("bonus") or "",
+            "stars": "★" * level + "☆" * (5 - level),
+            "level": level,
+            "current": current,
+            "need": need,
+            "exp": exp,
+        }
+        text_defaults = {
+            "user": {"text": "打开者：{user_name}｜ID：{user_id}", "x": 0.441, "y": 0.105, "size": 0.020, "color": self.settings["status_meta_color"], "bold": False},
+            "name": {"text": "{character_name}", "x": 0.441, "y": 0.190, "size": 0.042, "color": self.settings["status_name_color"], "bold": True},
+            "subtitle": {"text": "{subtitle_name}  |  {quality}  |  {bonus}", "x": 0.441, "y": 0.265, "size": 0.020, "color": self.settings["status_meta_color"], "bold": True},
+            "stars": {"text": "{stars}", "x": 0.441, "y": 0.323, "size": 0.031, "color": "#f5b642", "bold": True},
+            "level": {"text": "Lv.{level}  {current}/{need} EXP", "x": 0.441, "y": 0.390, "size": 0.021, "color": self.settings["status_meta_color"], "bold": True},
+        }
+        # Templates saved before a status text field was introduced still keep
+        # the familiar layout and derive their colors from the global status
+        # palette instead of disappearing.
+        effective_template = {**template, "texts": {**text_defaults, **(template.get("texts") or {})}}
+        if banner:
+            draw.rounded_rectangle((920, 96, 1148, 136), radius=16, fill=main)
+            draw.text((938, 102), banner, font=self._font(20, True, effective_template.get("font_family", "default")), fill="white")
+        self._draw_template_texts(draw, effective_template, values, size, ["user", "name", "subtitle", "stars", "level"])
         draw.rounded_rectangle((565, 370, 1148, 406), radius=18, fill="#dbe2ef")
-        draw.rounded_rectangle((565, 370, 565 + int(583 * ratio), 406), radius=18, fill=main)
+        if ratio:
+            draw.rounded_rectangle((565, 370, 565 + int(583 * ratio), 406), radius=18, fill=main)
 
-        # Character introductions are intentionally not rendered: group
-        # announcements hold the narrative copy, leaving this card focused on
-        # portrait, progression and skills.
+        family = str(effective_template.get("font_family") or "default")
         y = 445
         for threshold, (skill, desc) in zip([2, 3, 5], character["skills"]):
             unlocked = level >= threshold
-            fill = "#172033" if unlocked else "#8a94a6"
+            text_fill = "#172033" if unlocked else "#8a94a6"
             chip = main if unlocked else "#cfd6e4"
             draw.rounded_rectangle((565, y, 1148, y + 36), radius=14, fill=chip)
-            draw.text((585, y + 5), f"{threshold}星 {skill}", font=self._font(20, True), fill="white" if unlocked else "#566071")
-            draw.text((585, y + 41), desc, font=self._font(18), fill=meta_color if unlocked else fill)
+            draw.text((585, y + 5), f"{threshold}星 {skill}", font=self._font(20, True, family), fill="white" if unlocked else "#566071")
+            draw.text((585, y + 41), desc, font=self._font(18, False, family), fill=self.settings["status_meta_color"] if unlocked else text_fill)
             y += 64
-        img.save(path)
-        return path
+        return img
 
     def _render_inventory(self, player: Dict[str, Any], page: int = 1) -> Path:
         """Render owned companion groups; skins are always visually nested under their parent."""
@@ -2194,7 +2834,9 @@ class JubenNpcPlugin(Star):
         exclusive_border = self.settings["exclusive_item_border_color"]
         draw.text((58, 38), "同伴栏", font=self._font(54, True), fill="white")
         owned_total = len(player.get("npcs", {})) + len(player.get("skins", {}))
-        draw.text((60, 105), f"当前同伴：{self._character(player['current_npc'])['name']}    已拥有：{owned_total}    第 {page}/{total_pages} 页", font=self._font(24), fill="#dbe7f0")
+        current_entry = self._character_or_none(str(player.get("current_npc") or ""))
+        current_name = current_entry["name"] if current_entry else "未选择"
+        draw.text((60, 105), f"当前同伴：{current_name}    已拥有：{owned_total}    第 {page}/{total_pages} 页", font=self._font(24), fill="#dbe7f0")
 
         if not groups:
             draw.rounded_rectangle((55, 175, 1225, 565), radius=24, fill=(255, 255, 255, 238))
@@ -2268,6 +2910,8 @@ class JubenNpcPlugin(Star):
         draw = ImageDraw.Draw(img)
         draw.text((58, 38), "道具栏", font=self._font(54, True), fill="white")
         draw.text((60, 105), f"已获得道具：{sum(int(value.get('count', 0) or 0) for value in player.get('items', {}).values())}    第 {page}/{total_pages} 页", font=self._font(24), fill="#dbe7f0")
+        owner_label = str(player.get("name") or player.get("user_id") or "玩家")[:20]
+        draw.text((720, 105), f"查询者：{owner_label}｜ID：{player.get('user_id', '')}", font=self._font(22, True), fill="#dbe7f0")
         # Keep the shelf visually complete on an empty or partly-filled page.
         # Entries are capped at 8 per page, so they always stay inside this area.
         draw.rounded_rectangle((45, 160, 1235, 860), radius=24, fill=(255, 255, 255, 222))
