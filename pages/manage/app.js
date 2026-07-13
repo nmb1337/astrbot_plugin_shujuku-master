@@ -17,6 +17,16 @@ const STATUS_TEXTS = {
   level: { label: '等级经验', text: 'Lv.{level}  {current}/{need} EXP', x: 0.441, y: 0.39, size: 0.021, color: '#6d9bc6', bold: true },
 };
 
+const FONT_OPTIONS = [
+  ['default', '默认中文字体（Noto）'], ['msyh', '微软雅黑'], ['simhei', '黑体'], ['simsun', '宋体'], ['kaiti', '楷体'],
+  ['fangsong', '仿宋'], ['dengxian', '等线'], ['lisu', '隶书'], ['youyuan', '幼圆'], ['stxingkai', '华文行楷'],
+  ['stfangsong', '华文仿宋'], ['stsong', '华文宋体'], ['stxihei', '华文细黑'],
+];
+const FONT_OPTIONS_HTML = FONT_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+const TEXT_STYLE_DEFAULTS = {
+  font_family: '', font_weight: 400, shadow_color: '#0b1020', shadow_offset_x: 1, shadow_offset_y: 2, shadow_blur: 1.5, shadow_opacity: 72,
+};
+
 let characters = [];
 let players = [];
 let settings = {};
@@ -162,6 +172,8 @@ function renderList() {
     item.className = `character-item ${entry.id === selectedId ? 'active' : ''} ${entry.kind === 'skin' ? 'skin-entry' : ''}`;
     const description = entry.kind === 'experience_ball'
       ? `${entry.exp_amount || 0} EXP · 权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
+      : entry.kind === 'item'
+        ? `道具 · 权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
       : `${entry.english_name || entry.quality || entry.star || '—'} ${entry.in_pool ? '· 奖池' : ''}`;
     item.innerHTML = `<img src="${entry.preview || assetUrl(entry.image)}" alt="" /><span><strong>${escapeHtml(entry.kind === 'skin' ? `↳ ${entry.name}` : entry.name)}</strong><span>${escapeHtml(description)}</span></span>`;
     item.addEventListener('click', () => { selectedId = entry.id; renderList(); fillCharacter(entry); });
@@ -214,8 +226,10 @@ function toggleKindFields(kind) {
   $$('.skin-only').forEach((element) => element.classList.toggle('hidden', kind !== 'skin'));
   $$('.item-only').forEach((element) => element.classList.toggle('hidden', kind !== 'item'));
   $$('.experience-only').forEach((element) => element.classList.toggle('hidden', kind !== 'experience_ball'));
+  $$('.weighted-only').forEach((element) => element.classList.toggle('hidden', !['item', 'experience_ball'].includes(kind)));
+  $$('.quality-field').forEach((element) => element.classList.toggle('hidden', kind === 'item'));
   const form = $('#character-form');
-  form.elements.quality.placeholder = kind === 'item' ? '普通 / 中级 / 高级' : (kind === 'experience_ball' ? '经验球' : 'SSR / SR / R');
+  form.elements.quality.placeholder = kind === 'experience_ball' ? '经验球' : 'SSR / SR / R';
 }
 function fillCharacter(entry) {
   const form = $('#character-form');
@@ -229,7 +243,11 @@ function fillCharacter(entry) {
   $('#parent-companion').value = entry.parent_id || '';
   toggleKindFields(entry.kind || 'companion');
   $('#preview-image').src = entry.preview || assetUrl(entry.image); $('#preview-title').textContent = entry.name || '未命名条目';
-  $('#preview-subtitle').textContent = entry.kind === 'experience_ball' ? `抽中后直接 +${entry.exp_amount || 0} EXP，权重 ${entry.draw_weight || 1}` : `${kindLabel(entry.kind)} · ${entry.english_name || entry.quality || '—'}`;
+  $('#preview-subtitle').textContent = entry.kind === 'experience_ball'
+    ? `抽中后直接 +${entry.exp_amount || 0} EXP，权重 ${entry.draw_weight || 1}`
+    : entry.kind === 'item'
+      ? `道具 · 抽取权重 ${entry.draw_weight || 1}`
+      : `${kindLabel(entry.kind)} · ${entry.english_name || entry.quality || '—'}`;
 }
 function readCharacter() {
   const form = $('#character-form'); const kind = form.elements.kind.value;
@@ -277,20 +295,26 @@ async function uploadEntryFile(file) {
 function templateDefaults(type) {
   const texts = type === 'checkin' ? CHECKIN_TEXTS : STATUS_TEXTS;
   return {
-    id: '', name: '', bound_entry_id: '', priority: 0, background_image: '', panel_image: '', portrait_frame_image: '', image: '', enabled: true, show_companion: true,
+    id: '', name: '', bound_entry_id: '', priority: 0, background_image: '', panel_image: '', portrait_frame_image: '', image: '', enabled: true, show_companion: true, text_style_version: 2,
     portrait_scale: 1, portrait_offset_x: 0, portrait_offset_y: 0, font_family: 'default', panel_color: type === 'checkin' ? '#152238' : '#ffffff', message: type === 'checkin' ? '今日也要和同伴一起前进。' : '',
     texts: Object.fromEntries(Object.entries(texts).map(([key, value]) => [key, { ...value }])),
   };
 }
 function textRow(container, key, config, label = '') {
   const row = document.createElement('div'); row.className = 'text-row'; row.dataset.textKey = key;
-  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" /><input data-field="x" type="number" min="0" max="1" step="0.01" /><input data-field="y" type="number" min="0" max="1" step="0.01" /><input data-field="size" type="number" min="0.015" max="0.15" step="0.005" /><input data-field="color" type="color" /><label class="bold-control"><input data-field="bold" type="checkbox" /><span>加粗</span></label><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
+  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" aria-label="文字内容" /><input data-field="x" aria-label="X 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="y" aria-label="Y 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="size" aria-label="字号" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family" aria-label="字体"><option value="">继承模板字体</option>${FONT_OPTIONS_HTML}</select><select data-field="font_weight" aria-label="字重"><option value="300">细体 300</option><option value="400">常规 400</option><option value="500">中等 500</option><option value="600">半粗 600</option><option value="700">粗体 700</option><option value="800">特粗 800</option><option value="900">黑体 900</option></select><input data-field="color" aria-label="文字颜色" type="color" /><details class="shadow-control"><summary>阴影</summary><label>颜色<input data-field="shadow_color" aria-label="阴影颜色" type="color" /></label><label>X<input data-field="shadow_offset_x" aria-label="阴影 X 偏移" type="number" min="-40" max="40" step="1" /></label><label>Y<input data-field="shadow_offset_y" aria-label="阴影 Y 偏移" type="number" min="-40" max="40" step="1" /></label><label>模糊<input data-field="shadow_blur" aria-label="阴影模糊" type="number" min="0" max="12" step="0.5" /></label><label>透明<input data-field="shadow_opacity" aria-label="阴影透明度" type="number" min="0" max="255" step="1" /></label></details><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
   row.querySelector('[data-field="text"]').value = config.text || '';
   row.querySelector('[data-field="x"]').value = config.x ?? 0;
   row.querySelector('[data-field="y"]').value = config.y ?? 0;
   row.querySelector('[data-field="size"]').value = config.size ?? 0.03;
   row.querySelector('[data-field="color"]').value = config.color || '#ffffff';
-  row.querySelector('[data-field="bold"]').checked = Boolean(config.bold);
+  row.querySelector('[data-field="font_family"]').value = config.font_family || '';
+  row.querySelector('[data-field="font_weight"]').value = String(config.font_weight ?? (config.bold ? 700 : TEXT_STYLE_DEFAULTS.font_weight));
+  row.querySelector('[data-field="shadow_color"]').value = config.shadow_color || TEXT_STYLE_DEFAULTS.shadow_color;
+  row.querySelector('[data-field="shadow_offset_x"]').value = config.shadow_offset_x ?? TEXT_STYLE_DEFAULTS.shadow_offset_x;
+  row.querySelector('[data-field="shadow_offset_y"]').value = config.shadow_offset_y ?? TEXT_STYLE_DEFAULTS.shadow_offset_y;
+  row.querySelector('[data-field="shadow_blur"]').value = config.shadow_blur ?? TEXT_STYLE_DEFAULTS.shadow_blur;
+  row.querySelector('[data-field="shadow_opacity"]').value = config.shadow_opacity ?? TEXT_STYLE_DEFAULTS.shadow_opacity;
   row.querySelector('.remove-text').addEventListener('click', () => row.remove());
   container.appendChild(row);
 }
@@ -298,14 +322,19 @@ function buildTextRows(type, values = {}) {
   const defaults = type === 'checkin' ? CHECKIN_TEXTS : STATUS_TEXTS;
   const container = $(`#${type}-text-rows`); container.innerHTML = '';
   const keys = [...Object.keys(defaults), ...Object.keys(values || {}).filter((key) => !(key in defaults))];
-  keys.forEach((key) => textRow(container, key, { ...(defaults[key] || { label: key, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }), ...(values?.[key] || {}) }, defaults[key]?.label || key));
+  keys.forEach((key) => textRow(container, key, { ...TEXT_STYLE_DEFAULTS, ...(defaults[key] || { label: key, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }), ...(values?.[key] || {}) }, defaults[key]?.label || key));
 }
 function readTextRows(type) {
   const texts = {};
   $$(`#${type}-text-rows .text-row`).forEach((row) => {
     const key = row.dataset.textKey; if (!key) return;
     const field = (name) => row.querySelector(`[data-field="${name}"]`);
-    texts[key] = { text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), color: field('color').value, bold: field('bold').checked };
+    const fontWeight = numberValue(field('font_weight').value, 400);
+    texts[key] = {
+      text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), color: field('color').value,
+      font_family: field('font_family').value, font_weight: fontWeight, bold: fontWeight >= 600,
+      shadow_color: field('shadow_color').value, shadow_offset_x: numberValue(field('shadow_offset_x').value, 1), shadow_offset_y: numberValue(field('shadow_offset_y').value, 2), shadow_blur: numberValue(field('shadow_blur').value, 1.5), shadow_opacity: numberValue(field('shadow_opacity').value, 72),
+    };
   });
   return texts;
 }
@@ -335,7 +364,7 @@ function fillTemplate(type, template) {
 function readTemplate(type) {
   const form = $(`#${type}-template-form`);
   return {
-    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), font_family: form.elements.font_family.value,
+    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), font_family: form.elements.font_family.value, text_style_version: 2,
     background_image: form.elements.background_image.value.trim(), panel_image: form.elements.panel_image.value.trim(), portrait_frame_image: form.elements.portrait_frame_image.value.trim(), panel_color: form.elements.panel_color.value,
     enabled: form.elements.enabled.checked, show_companion: form.elements.show_companion.checked, portrait_scale: numberValue(form.elements.portrait_scale.value, 1), portrait_offset_x: numberValue(form.elements.portrait_offset_x.value, 0), portrait_offset_y: numberValue(form.elements.portrait_offset_y.value, 0),
     ...(type === 'checkin' ? { message: form.elements.message.value.trim() } : {}), texts: readTextRows(type),
@@ -366,7 +395,7 @@ function addCustomText(type) {
   const safe = key.trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
   if (!safe) { toast('字段 ID 无效。'); return; }
   if ($(`#${type}-text-rows .text-row[data-text-key="${safe}"]`)) { toast('该文字行已存在。'); return; }
-  textRow($(`#${type}-text-rows`), safe, { label: safe, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }, safe);
+  textRow($(`#${type}-text-rows`), safe, { ...TEXT_STYLE_DEFAULTS, label: safe, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }, safe);
   schedulePreview(type);
 }
 

@@ -35,7 +35,7 @@
             <label data-color-group="status" hidden>状态栏小字与等级<input name="status_meta_color" type="color" /></label>
             <label data-color-group="status" hidden>状态栏默认面板<input name="status_panel_color" type="color" /></label>
             <label data-color-group="item" hidden>道具名称<input name="item_name_color" type="color" /></label>
-            <label data-color-group="item" hidden>道具品质<input name="item_quality_color" type="color" /></label>
+            <label data-color-group="item" hidden>道具标签<input name="item_quality_color" type="color" /></label>
             <label data-color-group="item" hidden>道具效果<input name="item_effect_color" type="color" /></label>
           </form>
         </div>
@@ -60,7 +60,7 @@
               <label>ID<input name="id" required placeholder="linger" /></label>
               <label>中文名称<input name="name" required placeholder="灵儿 / 星辰经验球" /></label>
               <label>英文名 / 副标题<input name="english_name" placeholder="Blue Predator" /></label>
-              <label>品质<input name="quality" placeholder="SSR / 普通 / 经验球" /></label>
+              <label class="quality-field">品质<input name="quality" placeholder="SSR / 经验球" /></label>
               <label class="skin-only">所属同伴<select name="parent_id" id="parent-companion"></select></label>
               <label class="companion-only wide">专属物品（每行一件）<textarea name="exclusive_items" rows="3" placeholder="灵儿的信物&#10;灵儿的徽章"></textarea></label>
               <label>图片文件<input name="image" placeholder="上传后自动填入" /></label>
@@ -71,7 +71,7 @@
               <label class="companion-only wide">经验加成<input name="bonus" placeholder="推理经验 +10%" /></label>
               <label class="item-only wide">道具效果<textarea name="effect" rows="2" placeholder="玩家使用后展示的效果说明"></textarea></label>
               <label class="experience-only">增加经验<input name="exp_amount" type="number" min="1" max="999999" value="10" /></label>
-              <label class="experience-only">抽取权重<input name="draw_weight" type="number" min="1" max="1000" value="10" /></label>
+              <label class="weighted-only hidden">抽取权重<input name="draw_weight" type="number" min="1" max="10000" value="10" /></label>
               <input name="intro" type="hidden" />
               <label class="companion-only">2星技能名<input name="skill0" /></label><label class="companion-only">2星技能描述<input name="skill0Desc" /></label>
               <label class="companion-only">3星技能名<input name="skill1" /></label><label class="companion-only">3星技能描述<input name="skill1Desc" /></label>
@@ -91,12 +91,12 @@
           <div class="template-editor">
             <form id="checkin-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_checkin" /></label><label>模板名称<input name="name" placeholder="灵儿打卡" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option></select></label><label>默认文字面板色<input name="panel_color" type="color" value="#152238" /></label>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板字体<select name="font_family"><option value="default">默认中文字体（Noto）</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="fangsong">仿宋</option><option value="dengxian">等线</option><option value="lisu">隶书</option><option value="youyuan">幼圆</option><option value="stxingkai">华文行楷</option><option value="stfangsong">华文仿宋</option><option value="stsong">华文宋体</option><option value="stxihei">华文细黑</option></select></label><label>默认文字面板色<input name="panel_color" type="color" value="#152238" /></label>
               <label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label><label class="checkline"><input name="show_companion" type="checkbox" checked />显示角色图</label><label>角色缩放<input name="portrait_scale" type="number" min="0.5" max="1.5" step="0.01" value="1" /></label>
               <label>角色横向偏移<input name="portrait_offset_x" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label><label>角色纵向偏移<input name="portrait_offset_y" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label><label class="wide">打卡附言（{message}）<input name="message" placeholder="今日也要和同伴一起前进。" /></label>
               <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label><label class="wide">文字面板 / 装饰层<input name="panel_image" placeholder="支持透明 PNG" /></label><label class="wide">角色框 / 透明边框层<input name="portrait_frame_image" placeholder="支持透明 PNG" /></label>
               <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{message}</code>、<code>{date}</code>、<code>{user_name}</code>、<code>{user_id}</code>。全尺寸透明图会完整叠加；较小图片会自动放到对应区域。</div>
-              <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 颜色 / 加粗</div>
+              <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 字体 / 字重 / 颜色 / 阴影 / 删除</div>
               <div id="checkin-text-rows" class="wide"></div><button id="add-checkin-text" class="secondary small wide" type="button">新增自定义文字行</button>
             </form>
             <div class="layer-upload-grid">
@@ -117,12 +117,12 @@
           <div class="template-editor">
             <form id="status-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_status" /></label><label>模板名称<input name="name" placeholder="灵儿状态栏" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option></select></label><label>默认信息面板色<input name="panel_color" type="color" value="#ffffff" /></label>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板字体<select name="font_family"><option value="default">默认中文字体（Noto）</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="fangsong">仿宋</option><option value="dengxian">等线</option><option value="lisu">隶书</option><option value="youyuan">幼圆</option><option value="stxingkai">华文行楷</option><option value="stfangsong">华文仿宋</option><option value="stsong">华文宋体</option><option value="stxihei">华文细黑</option></select></label><label>默认信息面板色<input name="panel_color" type="color" value="#ffffff" /></label>
               <label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label><label class="checkline"><input name="show_companion" type="checkbox" checked />显示角色图</label><label>角色缩放<input name="portrait_scale" type="number" min="0.5" max="1.5" step="0.01" value="1" /></label>
               <label>角色横向偏移<input name="portrait_offset_x" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label><label>角色纵向偏移<input name="portrait_offset_y" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label>
               <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label><label class="wide">右侧信息面板 / 装饰层<input name="panel_image" placeholder="支持透明 PNG" /></label><label class="wide">左侧角色框 / 透明边框层<input name="portrait_frame_image" placeholder="支持透明 PNG" /></label>
               <div class="wide template-help">可用变量：<code>{user_name}</code>、<code>{user_id}</code>、<code>{character_name}</code>、<code>{subtitle_name}</code>、<code>{quality}</code>、<code>{bonus}</code>、<code>{stars}</code>、<code>{level}</code>、<code>{current}</code>、<code>{need}</code>。</div>
-              <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 颜色 / 加粗</div>
+              <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 字体 / 字重 / 颜色 / 阴影 / 删除</div>
               <div id="status-text-rows" class="wide"></div><button id="add-status-text" class="secondary small wide" type="button">新增自定义文字行</button>
             </form>
             <div class="layer-upload-grid">

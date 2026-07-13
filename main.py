@@ -51,9 +51,15 @@ COMPANION_KIND = "companion"
 SKIN_KIND = "skin"
 ITEM_KIND = "item"
 EXPERIENCE_BALL_KIND = "experience_ball"
-ITEM_QUALITIES = ("普通", "中级", "高级")
-QUALITY_RANK = {"UR": 5, "SSR": 4, "SR": 3, "R": 2, "N": 1, "普通": 1, "中级": 2, "高级": 3}
-FONT_FAMILIES = ("default", "msyh", "simhei", "simsun", "kaiti")
+QUALITY_RANK = {"UR": 5, "SSR": 4, "SR": 3, "R": 2, "N": 1}
+# All of these names have a Windows system-font mapping below.  On Linux or
+# another host the renderer falls back to the bundled Noto Sans CJK font, so a
+# saved template always remains usable even if a particular font is absent.
+FONT_FAMILIES = (
+    "default", "msyh", "simhei", "simsun", "kaiti", "fangsong",
+    "dengxian", "lisu", "youyuan", "stxingkai", "stfangsong",
+    "stsong", "stxihei",
+)
 DEFAULT_VISUAL_SETTINGS = {
     "companion_name_color": "#172033",
     "companion_meta_color": "#6d9bc6",
@@ -215,7 +221,7 @@ class JubenNpcPlugin(Star):
                 "/中奖号码 - 机器人在固定范围内随机生成中奖号",
                 "同伴栏 [页码] - 直接触发，查看已获得同伴与皮肤",
                 "道具栏 [页码] - 直接触发，查看已获得道具",
-                "使用道具名 - 消耗一个普通道具",
+                "使用道具名 - 消耗一个道具",
             ],
             subtitle="后台 Plugin Page 可维护同伴、皮肤、道具、经验球、奖池、模板、色板和玩家资产。",
         )
@@ -247,7 +253,7 @@ class JubenNpcPlugin(Star):
             return
 
         # ``使用XXX`` is intentionally the one extra player action requested by
-        # the customer: it consumes a normal item and does not ask the AI to
+        # the customer: it consumes one item and does not ask the AI to
         # interpret a game effect.
         if re.fullmatch(r"使用(?:道具)?\s*\S.*", text):
             async for result in self.use_item_cmd(event):
@@ -486,7 +492,7 @@ class JubenNpcPlugin(Star):
 
     @filter.command("使用", alias={"使用道具"})
     async def use_item_cmd(self, event: AstrMessageEvent):
-        """Consume one ordinary item held by the sender.
+        """Consume one item held by the sender.
 
         Item effects are deliberately display copy, not arbitrary executable
         scripts.  This makes the requested `使用XXX` flow safe while still
@@ -1130,6 +1136,15 @@ class JubenNpcPlugin(Star):
         base["portrait_offset_y"] = self._template_number(data.get("portrait_offset_y"), base.get("portrait_offset_y", 0.0), -0.35, 0.35)
         family = str(data.get("font_family") or base.get("font_family") or "default").strip().lower()
         base["font_family"] = family if family in FONT_FAMILIES else "default"
+        # v2 adds per-row font, weight and shadow controls.  Previously every
+        # row was implicitly saved as ``default``, which made changing the
+        # template font appear to do nothing.  Migrate those implicit values to
+        # inheritance once; new rows can still explicitly select a font.
+        try:
+            text_style_version = int(data.get("text_style_version", 1) or 1)
+        except (TypeError, ValueError):
+            text_style_version = 1
+        base["text_style_version"] = 2
         if "message" in base or "message" in data:
             base["message"] = str(data.get("message") or base.get("message") or "").strip()[:180]
         panel_color = str(data.get("panel_color") or base["panel_color"])
@@ -1147,16 +1162,30 @@ class JubenNpcPlugin(Star):
             source = raw_texts.get(key) if isinstance(raw_texts.get(key), dict) else {}
             text = str(source.get("text", defaults.get("text", "")) or "")[:180]
             color = str(source.get("color") or defaults.get("color", "#ffffff"))
-            item_family = str(source.get("font_family") or base["font_family"] or "default").lower()
+            item_family = str(source.get("font_family") or "").lower()
+            if text_style_version < 2 and item_family == "default":
+                item_family = ""
+            raw_weight = source.get("font_weight")
+            if raw_weight is None:
+                raw_weight = 700 if bool(source.get("bold", defaults.get("bold", False))) else 400
             normalized_texts[safe_key] = {
                 "text": text,
                 "x": self._template_number(source.get("x"), float(defaults.get("x", 0.08)), 0, 1),
                 "y": self._template_number(source.get("y"), float(defaults.get("y", 0.72)), 0, 1),
                 "size": self._template_number(source.get("size"), float(defaults.get("size", 0.03)), 0.015, 0.15),
                 "color": color if re.fullmatch(r"#[0-9a-fA-F]{6}", color) else str(defaults.get("color", "#ffffff")),
-                "bold": bool(source.get("bold", defaults.get("bold", False))),
-                "font_family": item_family if item_family in FONT_FAMILIES else base["font_family"],
+                "font_weight": int(self._template_number(raw_weight, 400, 100, 900)),
+                # Kept for v1 readers only.  The renderer uses font_weight.
+                "bold": int(self._template_number(raw_weight, 400, 100, 900)) >= 600,
+                "font_family": item_family if item_family in FONT_FAMILIES else "",
+                "shadow_color": str(source.get("shadow_color") or defaults.get("shadow_color") or "#0b1020"),
+                "shadow_offset_x": self._template_number(source.get("shadow_offset_x"), float(defaults.get("shadow_offset_x", 1)), -40, 40),
+                "shadow_offset_y": self._template_number(source.get("shadow_offset_y"), float(defaults.get("shadow_offset_y", 2)), -40, 40),
+                "shadow_blur": self._template_number(source.get("shadow_blur"), float(defaults.get("shadow_blur", 1.5)), 0, 12),
+                "shadow_opacity": int(self._template_number(source.get("shadow_opacity"), float(defaults.get("shadow_opacity", 72)), 0, 255)),
             }
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", normalized_texts[safe_key]["shadow_color"]):
+                normalized_texts[safe_key]["shadow_color"] = "#0b1020"
         base["texts"] = normalized_texts
         return base
 
@@ -1206,12 +1235,8 @@ class JubenNpcPlugin(Star):
         kind = raw_kind if raw_kind in {COMPANION_KIND, SKIN_KIND, ITEM_KIND, EXPERIENCE_BALL_KIND} else COMPANION_KIND
         name = str(data.get("name") or data.get("id") or "未命名同伴").strip()
         character_id = self._slug(str(data.get("id") or name))
-        quality = str(data.get("quality") or data.get("star") or ("普通" if kind == ITEM_KIND else "R")).strip().upper()
-        if kind == ITEM_KIND:
-            quality = str(data.get("quality") or data.get("star") or "普通").strip()
-            if quality not in ITEM_QUALITIES:
-                quality = "普通"
-        elif quality not in QUALITY_RANK:
+        quality = str(data.get("quality") or data.get("star") or ("道具" if kind == ITEM_KIND else "R")).strip().upper()
+        if kind != ITEM_KIND and quality not in QUALITY_RANK:
             quality = "R"
         colors = data.get("colors") or ["#6c8cff", "#f4d35e", "#10172a"]
         if not isinstance(colors, list) or len(colors) < 3:
@@ -1235,16 +1260,15 @@ class JubenNpcPlugin(Star):
             }
 
         if kind == ITEM_KIND:
-            pool_tier = str(data.get("pool_tier") or data.get("tier") or quality).strip()
-            if pool_tier not in ITEM_QUALITIES:
-                pool_tier = quality
             return {
                 "id": character_id,
                 "kind": ITEM_KIND,
                 "name": name,
                 "english_name": str(data.get("english_name") or "").strip(),
-                "quality": quality,
-                "pool_tier": pool_tier,
+                # Items no longer have high/middle/normal tiers.  Their one
+                # shared 13% draw slot selects among enabled items by weight.
+                "quality": "道具",
+                "draw_weight": int(self._template_number(data.get("draw_weight"), 10, 1, 10000)),
                 "effect": str(data.get("effect") or "暂未填写效果。").strip(),
                 "image": image,
                 "in_pool": bool(data.get("in_pool", data.get("featured", False))),
@@ -1684,7 +1708,7 @@ class JubenNpcPlugin(Star):
         return None
 
     def _find_item(self, value: str) -> Optional[Dict[str, Any]]:
-        """Look up only a normal consumable item, never a character or EXP ball."""
+        """Look up only a consumable item, never a character or EXP ball."""
         value = (value or "").strip()
         if not value:
             return None
@@ -1927,13 +1951,11 @@ class JubenNpcPlugin(Star):
                 return reward_type, amount
         return "星币", 1
 
-    def _draw_pool(self, kind: str, tier: str = "") -> List[Dict[str, Any]]:
+    def _draw_pool(self, kind: str) -> List[Dict[str, Any]]:
         entries = [
             entry for entry in self.characters
             if entry.get("kind") == kind and entry.get("in_pool", False)
         ]
-        if kind == ITEM_KIND and tier:
-            entries = [entry for entry in entries if entry.get("pool_tier") == tier]
         # The monthly specification allows exactly one companion and one skin.
         # Legacy JSON may contain multiple historic featured entries, so remain
         # deterministic and safe until the operator next saves the pool in
@@ -1946,8 +1968,8 @@ class JubenNpcPlugin(Star):
     def _draw_pool_gaps(self) -> List[str]:
         """Return every required reward pool that is not ready for a paid draw.
 
-        The published odds include all three item tiers as well as a featured
-        companion and skin. Charging before all five pools exist would turn a
+        The published odds include a weighted item pool as well as a featured
+        companion and skin. Charging before all three pools exist would turn a
         valid probability slot into an empty reward and is hard to repair for
         the operator, so the command blocks before deducting currency.
         """
@@ -1956,17 +1978,15 @@ class JubenNpcPlugin(Star):
             gaps.append("同伴")
         if not self._draw_pool(SKIN_KIND):
             gaps.append("皮肤")
-        for tier in ITEM_QUALITIES:
-            if not self._draw_pool(ITEM_KIND, tier):
-                gaps.append(f"{tier}道具")
+        if not self._draw_pool(ITEM_KIND):
+            gaps.append("道具")
         return gaps
 
     def _enforce_single_featured_pool(self, saved_entry: Dict[str, Any]) -> None:
         """Keep one active companion and one active skin in the current pool.
 
-        Item pools intentionally remain many-to-one: any number of ordinary,
-        intermediate and advanced items can be checked, and one is sampled at
-        random for a matching roll.
+        The item pool intentionally remains many-to-one: every enabled item is
+        a candidate and its configured draw weight determines the selection.
         """
         kind = saved_entry.get("kind")
         if kind not in {COMPANION_KIND, SKIN_KIND} or not saved_entry.get("in_pool"):
@@ -2087,13 +2107,15 @@ class JubenNpcPlugin(Star):
         if roll < cursor:
             return self._roll_experience_ball(player, current_id)
 
-        for rate, tier in ((6, "普通"), (4, "中级"), (3, "高级")):
-            cursor += rate
-            if roll < cursor:
-                pool = self._draw_pool(ITEM_KIND, tier)
-                if not pool:
-                    return {"kind": f"{tier}道具池为空", "name": "未配置道具", "exp": 0, "character_id": current_id, "entry_kind": ITEM_KIND}
-                return self._grant_draw_entry(player, random.choice(pool), f"{tier}道具")
+        # The former normal/middle/high item brackets totalled 13%.  Keep that
+        # published total while putting all items into one weighted pool.
+        cursor += 13
+        if roll < cursor:
+            pool = self._draw_pool(ITEM_KIND)
+            if not pool:
+                return {"kind": "道具池为空", "name": "未配置道具", "exp": 0, "character_id": current_id, "entry_kind": ITEM_KIND}
+            weights = [max(1, int(entry.get("draw_weight", 1) or 1)) for entry in pool]
+            return self._grant_draw_entry(player, random.choices(pool, weights=weights, k=1)[0], "道具")
 
         cursor += 0.8
         if roll < cursor:
@@ -2272,12 +2294,28 @@ class JubenNpcPlugin(Star):
             "simhei": [Path("C:/Windows/Fonts/simhei.ttf")],
             "simsun": [Path("C:/Windows/Fonts/simsun.ttc")],
             "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
+            "fangsong": [Path("C:/Windows/Fonts/simfang.ttf")],
+            "dengxian": [Path("C:/Windows/Fonts/dengb.ttf"), Path("C:/Windows/Fonts/deng.ttf")],
+            "lisu": [Path("C:/Windows/Fonts/simli.ttf")],
+            "youyuan": [Path("C:/Windows/Fonts/simyou.ttf")],
+            "stxingkai": [Path("C:/Windows/Fonts/stxingka.ttf")],
+            "stfangsong": [Path("C:/Windows/Fonts/stfangso.ttf")],
+            "stsong": [Path("C:/Windows/Fonts/stsong.ttf")],
+            "stxihei": [Path("C:/Windows/Fonts/stxihei.ttf")],
         }
         family_regular = {
             "msyh": [Path("C:/Windows/Fonts/msyh.ttc"), Path("C:/Windows/Fonts/msyhbd.ttc")],
             "simhei": [Path("C:/Windows/Fonts/simhei.ttf")],
             "simsun": [Path("C:/Windows/Fonts/simsun.ttc")],
             "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
+            "fangsong": [Path("C:/Windows/Fonts/simfang.ttf")],
+            "dengxian": [Path("C:/Windows/Fonts/deng.ttf"), Path("C:/Windows/Fonts/dengb.ttf")],
+            "lisu": [Path("C:/Windows/Fonts/simli.ttf")],
+            "youyuan": [Path("C:/Windows/Fonts/simyou.ttf")],
+            "stxingkai": [Path("C:/Windows/Fonts/stxingka.ttf")],
+            "stfangsong": [Path("C:/Windows/Fonts/stfangso.ttf")],
+            "stsong": [Path("C:/Windows/Fonts/stsong.ttf")],
+            "stxihei": [Path("C:/Windows/Fonts/stxihei.ttf")],
         }
         system_bold = [
             Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
@@ -2555,7 +2593,7 @@ class JubenNpcPlugin(Star):
 
     def _draw_template_texts(
         self,
-        draw: ImageDraw.ImageDraw,
+        canvas: Image.Image,
         template: Dict[str, Any],
         values: Dict[str, Any],
         size: Tuple[int, int],
@@ -2573,12 +2611,38 @@ class JubenNpcPlugin(Star):
                 continue
             font_size = max(14, int(float(item.get("size", 0.04)) * size[0]))
             family = str(item.get("font_family") or template.get("font_family") or "default")
-            font = self._font(font_size, bool(item.get("bold")), family)
+            weight = int(self._template_number(item.get("font_weight"), 700 if item.get("bold") else 400, 100, 900))
+            font = self._font(font_size, weight >= 600, family)
             x = int(float(item.get("x", 0)) * size[0])
             y = int(float(item.get("y", 0)) * size[1])
             color = self._template_color(item.get("color"), "#ffffff")
-            draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 130))
-            draw.text((x, y), text, font=font, fill=color)
+            # Use a real, optional blur layer instead of the former hard-coded
+            # black +2px copy.  It is softer by default and each part can be
+            # changed per text row in the management UI.
+            shadow_opacity = int(self._template_number(item.get("shadow_opacity"), 72, 0, 255))
+            shadow_blur = self._template_number(item.get("shadow_blur"), 1.5, 0, 12)
+            if shadow_opacity:
+                shadow_color = self._template_color(item.get("shadow_color"), "#0b1020")
+                shadow_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+                shadow_draw = ImageDraw.Draw(shadow_layer)
+                shadow_rgb = tuple(int(shadow_color[index:index + 2], 16) for index in (1, 3, 5))
+                shadow_draw.text(
+                    (
+                        x + int(self._template_number(item.get("shadow_offset_x"), 1, -40, 40)),
+                        y + int(self._template_number(item.get("shadow_offset_y"), 2, -40, 40)),
+                    ),
+                    text,
+                    font=font,
+                    fill=shadow_rgb + (shadow_opacity,),
+                )
+                if shadow_blur:
+                    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(shadow_blur))
+                canvas.alpha_composite(shadow_layer)
+            stroke_width = 2 if weight >= 900 else (1 if weight >= 800 else 0)
+            ImageDraw.Draw(canvas).text(
+                (x, y), text, font=font, fill=color,
+                stroke_width=stroke_width, stroke_fill=color,
+            )
 
     def _render_checkin_card(self, player: Dict[str, Any], title: str, reward: str, today: str = "") -> Path:
         """Render a full-bleed 16:9 check-in card using its role-bound template."""
@@ -2633,7 +2697,7 @@ class JubenNpcPlugin(Star):
             self._composite_template_layer(img, self.checkin_assets_dir, panel_image, panel_box)
         if frame_image:
             self._composite_template_layer(img, self.checkin_assets_dir, frame_image, portrait_box)
-        self._draw_template_texts(draw, template, values, size)
+        self._draw_template_texts(img, template, values, size)
         return img
 
     @staticmethod
@@ -2734,7 +2798,7 @@ class JubenNpcPlugin(Star):
         if banner:
             draw.rounded_rectangle((920, 96, 1148, 136), radius=16, fill=main)
             draw.text((938, 102), banner, font=self._font(20, True, effective_template.get("font_family", "default")), fill="white")
-        self._draw_template_texts(draw, effective_template, values, size, ["user", "name", "subtitle", "stars", "level"])
+        self._draw_template_texts(img, effective_template, values, size, ["user", "name", "subtitle", "stars", "level"])
         draw.rounded_rectangle((565, 370, 1148, 406), radius=18, fill="#dbe2ef")
         if ratio:
             draw.rounded_rectangle((565, 370, 565 + int(583 * ratio), 406), radius=18, fill=main)
@@ -2790,7 +2854,9 @@ class JubenNpcPlugin(Star):
         # groups before page slicing so one heavily customized companion cannot
         # make the image unboundedly tall.  Continued segments intentionally
         # repeat the parent row, keeping every skin visibly attached to it.
-        skins_per_segment = 2
+        # Keep a typical companion and its full skin collection together.  The
+        # compact rows below still grow safely for unusually large collections.
+        skins_per_segment = 6
         segmented_groups = []
         for sort_key, companion, own_companion, owned_skins, exp, exclusive_items in all_groups:
             if not owned_skins:
@@ -2809,18 +2875,22 @@ class JubenNpcPlugin(Star):
                     )
                 )
 
-        per_page = 2
+        # Two large rows made the companion shelf spill to a new page almost
+        # immediately.  The compact layout is intentionally sized for six
+        # normal companion groups per page.
+        per_page = 6
         total_pages = max(1, (len(segmented_groups) + per_page - 1) // per_page)
         page = max(1, min(total_pages, page))
         groups = segmented_groups[(page - 1) * per_page: page * per_page]
         def companion_row_height(exclusive_items: List[str]) -> int:
-            rows = (len(exclusive_items) + 1) // 2
-            return 164 + max(0, rows - 1) * 38
+            # Customer-requested three exclusive items per row.
+            rows = (len(exclusive_items) + 2) // 3
+            return 128 + max(0, rows - 1) * 30
 
         height = max(
             720,
             180 + sum(
-                companion_row_height(exclusive_items) + 18 + len(skins) * 104
+                companion_row_height(exclusive_items) + len(skins) * 60 + 6
                 for _, _, _, skins, _, _, exclusive_items in groups
             ) + 45,
         )
@@ -2845,53 +2915,57 @@ class JubenNpcPlugin(Star):
             img.save(path)
             return path
 
-        y = 164
+        y = 154
         for _, companion, own_companion, owned_skins, exp, skin_offset, exclusive_items in groups:
             row_height = companion_row_height(exclusive_items)
             main = companion["colors"][0]
             row_fill = (255, 255, 255, 238) if own_companion else (229, 234, 240, 232)
-            draw.rounded_rectangle((52, y, 1228, y + row_height), radius=18, fill=row_fill, outline=border_color, width=3)
-            portrait = self._portrait(companion, (214, 148))
+            draw.rounded_rectangle((52, y, 1228, y + row_height), radius=16, fill=row_fill, outline=border_color, width=3)
+            portrait = self._portrait(companion, (178, 112))
             if not own_companion:
                 portrait = ImageEnhance.Color(portrait).enhance(0.05).filter(ImageFilter.GaussianBlur(0.45))
-            img.alpha_composite(portrait, (68, y + 8))
+            img.alpha_composite(portrait, (68, y + 7))
             name_fill = title_color if own_companion else "#8b94a6"
             sub_fill = meta_color if own_companion else "#9aa4b3"
-            draw.text((304, y + 17), companion["name"], font=self._font(31, True), fill=name_fill)
-            draw.text((304, y + 57), f"{companion.get('english_name') or '—'}  |  {companion.get('quality', companion.get('star', 'R'))}  |  {companion['bonus']}", font=self._font(21), fill=sub_fill)
+            draw.text((266, y + 13), companion["name"], font=self._font(28, True), fill=name_fill)
+            draw.text((266, y + 48), f"{companion.get('english_name') or '—'}  |  {companion.get('quality', companion.get('star', 'R'))}  |  {companion['bonus']}", font=self._font(18), fill=sub_fill)
             level, current, need, ratio = self._level_info(exp) if own_companion else (0, 0, LEVEL_REQUIREMENTS[0], 0)
-            draw.rounded_rectangle((304, y + 93, 803, y + 115), radius=11, fill="#dbe2ef")
+            draw.rounded_rectangle((266, y + 76, 727, y + 96), radius=10, fill="#dbe2ef")
             if own_companion:
-                draw.rounded_rectangle((304, y + 93, 304 + int(499 * ratio), y + 115), radius=11, fill=main)
-            draw.text((825, y + 89), f"{'已拥有' if own_companion else '未获得'}  Lv.{level}  {current}/{need}", font=self._font(20), fill=sub_fill)
+                draw.rounded_rectangle((266, y + 76, 266 + int(461 * ratio), y + 96), radius=10, fill=main)
+            draw.text((744, y + 73), f"{'已拥有' if own_companion else '未获得'}  Lv.{level}  {current}/{need}", font=self._font(18), fill=sub_fill)
             for item_index, exclusive_name in enumerate(exclusive_items):
-                column, item_row = item_index % 2, item_index // 2
-                item_x = 304 + column * 394
-                item_y = y + 126 + item_row * 38
+                column, item_row = item_index % 3, item_index // 3
+                item_x = 266 + column * 301
+                item_y = y + 101 + item_row * 30
                 exclusive_owned = self._has_exclusive_item(player, companion["id"], exclusive_name)
                 item_color = exclusive_color if exclusive_owned else "#9aa4b3"
                 item_border = exclusive_border if exclusive_owned else "#c5ccd6"
-                draw.rounded_rectangle((item_x, item_y, item_x + 370, item_y + 32), radius=10, outline=item_border, width=2, fill=(255, 255, 255, 35))
+                draw.rounded_rectangle((item_x, item_y, item_x + 284, item_y + 25), radius=8, outline=item_border, width=1, fill=(255, 255, 255, 35))
                 label = f"专属物品：{exclusive_name}"
-                draw.text((item_x + 15, item_y + 4), label[:22], font=self._font(16, True), fill=item_color)
+                draw.text((item_x + 10, item_y + 3), label[:16], font=self._font(14, True), fill=item_color)
             if companion["id"] == player.get("current_npc"):
-                draw.rounded_rectangle((1120, y + 16, 1204, y + 49), radius=12, fill=main)
-                draw.text((1137, y + 20), "当前", font=self._font(17, True), fill="white")
+                draw.rounded_rectangle((1134, y + 14, 1204, y + 42), radius=11, fill=main)
+                draw.text((1147, y + 18), "当前", font=self._font(15, True), fill="white")
             if skin_offset:
-                draw.rounded_rectangle((995, y + 16, 1098, y + 49), radius=12, fill="#7d8798")
-                draw.text((1010, y + 20), "皮肤续页", font=self._font(15, True), fill="white")
-            y += row_height + 18
+                draw.rounded_rectangle((1038, y + 14, 1124, y + 42), radius=11, fill="#7d8798")
+                draw.text((1050, y + 18), "皮肤续页", font=self._font(13, True), fill="white")
+            # Skin rows deliberately meet the parent card with no blank strip.
+            y += row_height
 
             for skin in owned_skins:
-                draw.rounded_rectangle((122, y, 1175, y + 82), radius=16, fill=(255, 255, 255, 225), outline=border_color, width=2)
-                portrait = self._portrait(skin, (150, 68))
-                img.alpha_composite(portrait, (140, y + 7))
-                draw.text((316, y + 13), f"皮肤：{skin['name']}", font=self._font(25, True), fill=title_color)
-                draw.text((316, y + 46), f"{skin.get('english_name') or skin['name']}  |  {skin.get('quality', skin.get('star', 'R'))}", font=self._font(18), fill=meta_color)
+                draw.rounded_rectangle((122, y, 1175, y + 58), radius=12, fill=(255, 255, 255, 225), outline=border_color, width=2)
+                portrait = self._portrait(skin, (116, 52))
+                img.alpha_composite(portrait, (140, y + 3))
+                draw.text((274, y + 7), f"皮肤：{skin['name']}", font=self._font(21, True), fill=title_color)
+                draw.text((274, y + 33), f"{skin.get('english_name') or skin['name']}  |  {skin.get('quality', skin.get('star', 'R'))}", font=self._font(16), fill=meta_color)
                 if skin["id"] == player.get("current_skin"):
-                    draw.rounded_rectangle((1060, y + 21, 1144, y + 53), radius=12, fill=companion["colors"][0])
-                    draw.text((1076, y + 24), "已装备", font=self._font(15, True), fill="white")
-                y += 104
+                    draw.rounded_rectangle((1060, y + 14, 1133, y + 42), radius=11, fill=companion["colors"][0])
+                    draw.text((1072, y + 18), "已装备", font=self._font(13, True), fill="white")
+                y += 60
+            # Keep a small separation between companion groups, while skins
+            # remain flush with the parent card above.
+            y += 6
         img.save(path)
         return path
 
@@ -2900,7 +2974,7 @@ class JubenNpcPlugin(Star):
             item for item in self._items()
             if int(player.get("items", {}).get(item["id"], {}).get("count", 0) or 0) > 0
         ]
-        owned_items.sort(key=lambda item: (-QUALITY_RANK.get(item.get("quality"), 0), item["name"], item["id"]))
+        owned_items.sort(key=lambda item: (item["name"], item["id"]))
         per_page = 8
         total_pages = max(1, (len(owned_items) + per_page - 1) // per_page)
         page = max(1, min(total_pages, page))
@@ -2927,7 +3001,7 @@ class JubenNpcPlugin(Star):
             draw.rounded_rectangle((x, y, x + 260, y + 315), radius=18, fill=(255, 255, 255, 238), outline=self.settings["companion_border_color"], width=2)
             img.alpha_composite(self._portrait(item, (226, 130)), (x + 17, y + 17))
             draw.text((x + 18, y + 164), item["name"], font=self._font(25, True), fill=self.settings["item_name_color"])
-            draw.text((x + 18, y + 202), item.get("quality", "普通"), font=self._font(20, True), fill=self.settings["item_quality_color"])
+            draw.text((x + 18, y + 202), "道具", font=self._font(20, True), fill=self.settings["item_quality_color"])
             effect_lines = self._wrap(draw, item.get("effect", ""), self._font(18), 220)[:3]
             for line_index, line in enumerate(effect_lines):
                 draw.text((x + 18, y + 236 + line_index * 24), line, font=self._font(18), fill=self.settings["item_effect_color"])

@@ -75,12 +75,19 @@ textarea { resize: vertical; }
 .template-layout { padding: 16px; }
 .template-form { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0; }
 .template-help { color: #607086; font-size: 13px; line-height: 1.6; }
-.text-table-head, .text-row { align-items: center; display: grid; gap: 8px; grid-template-columns: 64px minmax(0, 1fr) repeat(3, 50px) 52px 60px 30px; }
+.text-table-head, .text-row { align-items: center; display: grid; gap: 8px; grid-template-columns: 64px minmax(150px, 1fr) repeat(3, 50px) minmax(110px, .85fr) minmax(88px, .65fr) 52px minmax(76px, .65fr) 30px; }
 .text-table-head { color: #607086; font-size: 12px; }
 .text-row { margin: 7px 0; }
-.text-row input { min-width: 0; }
+.text-row input, .text-row select { min-width: 0; }
 .text-row input[type="color"] { min-height: 36px; padding: 3px; }
-.bold-control { align-items: center; color: #526071; display: flex; font-size: 12px; gap: 5px; }
+.shadow-control { color: #526071; font-size: 12px; min-width: 0; position: relative; }
+.shadow-control summary { cursor: pointer; list-style: none; white-space: nowrap; }
+.shadow-control summary::after { content: "⌄"; margin-left: 4px; }
+.shadow-control[open] { background: #f8fbff; border: 1px solid #dbe7f5; border-radius: 8px; box-shadow: 0 8px 20px rgb(30 60 95 / 12%); padding: 8px; position: absolute; right: 38px; z-index: 3; }
+.shadow-control[open] summary { margin-bottom: 7px; }
+.shadow-control label { align-items: center; display: grid; gap: 5px; grid-template-columns: 34px 1fr; margin-top: 5px; }
+.shadow-control input { min-height: 28px; padding: 3px 6px; }
+.shadow-control input[type="color"] { min-height: 28px; }
 .remove-text { border-radius: 50%; height: 30px; line-height: 1; padding: 0; width: 30px; }
 .layer-upload-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 16px; }
 .template-preview { aspect-ratio: 16 / 9; background: #edf2f7; border: 1px solid #dce3ec; border-radius: 8px; display: block; margin: 0 16px 16px; max-width: calc(100% - 32px); object-fit: cover; width: 720px; }
@@ -105,6 +112,7 @@ textarea { resize: vertical; }
   .text-table-head { display: none; }
   .text-row { grid-template-columns: 1fr 1fr 1fr; border: 1px solid #e0e7f0; border-radius: 8px; padding: 10px; }
   .text-row strong, .text-row input[data-field="text"] { grid-column: 1 / -1; }
+  .shadow-control[open] { position: static; }
   .preview { grid-template-columns: 1fr; }
   .upload-row, .asset-actions { align-items: stretch; flex-direction: column; }
   .preview img { width: 100%; }
