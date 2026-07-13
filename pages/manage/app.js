@@ -21,10 +21,12 @@ const FONT_OPTIONS = [
   ['default', '默认中文字体（Noto）'], ['msyh', '微软雅黑'], ['simhei', '黑体'], ['simsun', '宋体'], ['kaiti', '楷体'],
   ['fangsong', '仿宋'], ['dengxian', '等线'], ['lisu', '隶书'], ['youyuan', '幼圆'], ['stxingkai', '华文行楷'],
   ['stfangsong', '华文仿宋'], ['stsong', '华文宋体'], ['stxihei', '华文细黑'],
+  ['zcool_kuaile', '站酷快乐体（可爱）'], ['mashanzheng', '马善政毛笔（手写）'], ['zcool_qingke', '站酷庆科黄油体（圆润）'],
+  ['longcang', '龙藏体（飘逸）'], ['liujianmaocao', '刘建毛草（签名字）'],
 ];
 const FONT_OPTIONS_HTML = FONT_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
 const TEXT_STYLE_DEFAULTS = {
-  font_family: '', font_weight: 400, shadow_color: '#0b1020', shadow_offset_x: 1, shadow_offset_y: 2, shadow_blur: 1.5, shadow_opacity: 72,
+  font_family: '', font_weight: 400, shadow_color: '#1c2a40', shadow_offset_x: 0, shadow_offset_y: 2, shadow_blur: 2.5, shadow_opacity: 64,
 };
 
 let characters = [];
@@ -302,7 +304,7 @@ function templateDefaults(type) {
 }
 function textRow(container, key, config, label = '') {
   const row = document.createElement('div'); row.className = 'text-row'; row.dataset.textKey = key;
-  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" aria-label="文字内容" /><input data-field="x" aria-label="X 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="y" aria-label="Y 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="size" aria-label="字号" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family" aria-label="字体"><option value="">继承模板字体</option>${FONT_OPTIONS_HTML}</select><select data-field="font_weight" aria-label="字重"><option value="300">细体 300</option><option value="400">常规 400</option><option value="500">中等 500</option><option value="600">半粗 600</option><option value="700">粗体 700</option><option value="800">特粗 800</option><option value="900">黑体 900</option></select><input data-field="color" aria-label="文字颜色" type="color" /><details class="shadow-control"><summary>阴影</summary><label>颜色<input data-field="shadow_color" aria-label="阴影颜色" type="color" /></label><label>X<input data-field="shadow_offset_x" aria-label="阴影 X 偏移" type="number" min="-40" max="40" step="1" /></label><label>Y<input data-field="shadow_offset_y" aria-label="阴影 Y 偏移" type="number" min="-40" max="40" step="1" /></label><label>模糊<input data-field="shadow_blur" aria-label="阴影模糊" type="number" min="0" max="12" step="0.5" /></label><label>透明<input data-field="shadow_opacity" aria-label="阴影透明度" type="number" min="0" max="255" step="1" /></label></details><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
+  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" aria-label="文字内容" /><input data-field="x" aria-label="X 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="y" aria-label="Y 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="size" aria-label="字号" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family" aria-label="字体"><option value="">继承模板字体</option>${FONT_OPTIONS_HTML}</select><select data-field="font_weight" aria-label="字重"><option value="100">极细 100</option><option value="200">纤细 200</option><option value="300">细体 300</option><option value="400">常规 400</option><option value="500">中等 500</option><option value="600">半粗 600</option><option value="700">粗体 700</option><option value="800">特粗 800</option><option value="900">黑体 900</option></select><input data-field="color" aria-label="文字颜色" type="color" /><details class="shadow-control"><summary>柔和阴影</summary><label>颜色<input data-field="shadow_color" aria-label="阴影颜色" type="color" /></label><label>X<input data-field="shadow_offset_x" aria-label="阴影 X 偏移" type="number" min="-40" max="40" step="1" /></label><label>Y<input data-field="shadow_offset_y" aria-label="阴影 Y 偏移" type="number" min="-40" max="40" step="1" /></label><label>模糊<input data-field="shadow_blur" aria-label="阴影模糊" type="number" min="0" max="12" step="0.5" /></label><label>不透明度<input data-field="shadow_opacity" aria-label="阴影不透明度" type="number" min="0" max="255" step="1" /></label></details><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
   row.querySelector('[data-field="text"]').value = config.text || '';
   row.querySelector('[data-field="x"]').value = config.x ?? 0;
   row.querySelector('[data-field="y"]').value = config.y ?? 0;
@@ -333,7 +335,7 @@ function readTextRows(type) {
     texts[key] = {
       text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), color: field('color').value,
       font_family: field('font_family').value, font_weight: fontWeight, bold: fontWeight >= 600,
-      shadow_color: field('shadow_color').value, shadow_offset_x: numberValue(field('shadow_offset_x').value, 1), shadow_offset_y: numberValue(field('shadow_offset_y').value, 2), shadow_blur: numberValue(field('shadow_blur').value, 1.5), shadow_opacity: numberValue(field('shadow_opacity').value, 72),
+      shadow_color: field('shadow_color').value, shadow_offset_x: numberValue(field('shadow_offset_x').value, 0), shadow_offset_y: numberValue(field('shadow_offset_y').value, 2), shadow_blur: numberValue(field('shadow_blur').value, 2.5), shadow_opacity: numberValue(field('shadow_opacity').value, 64),
     };
   });
   return texts;
