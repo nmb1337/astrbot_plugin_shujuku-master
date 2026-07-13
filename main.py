@@ -284,7 +284,7 @@ class JubenNpcPlugin(Star):
         messages, so match *only* complete commands here.  Anchoring the match
         prevents normal chat such as "今天打卡了" from being consumed.
         """
-        text = (event.message_str or "").strip().lstrip("/!！").strip()
+        text = self._strip_game_command_prefix((event.message_str or "").strip().lstrip("/!！").strip())
         direct_handlers = {
             "打卡": self.checkin_cmd,
             "抽奖": self.draw_cmd,
@@ -292,6 +292,7 @@ class JubenNpcPlugin(Star):
             "同伴栏": self.inventory_cmd,
             "道具栏": self.item_inventory_cmd,
             "切换同伴": self.switch_cmd,
+            "切换角色": self.switch_cmd,
         }
         # Do not consume ordinary conversation such as ``今天打卡了``.  At the
         # same time accept both documented page styles (``同伴栏 2`` and
@@ -300,8 +301,8 @@ class JubenNpcPlugin(Star):
         direct_match = re.fullmatch(
             r"(打卡|抽奖)(?:\s*)|"
             r"(状态栏)(?:\s+.+)?|"
-            r"(同伴栏|道具栏)(?:\s*(?:第?\d+\s*页?)?)|"
-            r"(切换同伴)(?:\s+.+)",
+            r"(同伴栏|道具栏)(?:\s*(?:第?(?:\d+|[〇零一二三四五六七八九十百千万两]+)\s*页?)?)|"
+            r"(切换同伴|切换角色)(?:\s*.+)",
             text,
         )
         if direct_match:
@@ -311,6 +312,17 @@ class JubenNpcPlugin(Star):
                 yield result
             event.stop_event()
             return
+
+        # The customer also tried the concise ``切换鲛喵`` form.  Treat it as a
+        # switch only when its suffix is an actual library entry, so everyday
+        # conversation such as “切换下个话题” still reaches the AI unchanged.
+        if text.startswith("切换") and not text.startswith(("切换同伴", "切换角色")):
+            target = text[len("切换"):].strip()
+            if target and self._find_character(target):
+                async for result in self.switch_cmd(event):
+                    yield result
+                event.stop_event()
+                return
 
         # ``使用XXX`` is intentionally the one extra player action requested by
         # the customer: it consumes one item and does not ask the AI to
@@ -1946,10 +1958,12 @@ class JubenNpcPlugin(Star):
         such as ``2`` and ``灵儿``.  That made documented pagination and companion
         switching appear unavailable.
         """
-        text = str(getattr(event, "message_str", "") or "").strip().lstrip("/!！").strip()
+        text = self._strip_game_command_prefix(
+            str(getattr(event, "message_str", "") or "").strip().lstrip("/!！").strip()
+        )
         command_prefixes = [
             "剧本杀帮助", "同伴帮助", "伙伴帮助", "赠送星币", "发放星币", "赠送同伴", "赠送角色", "赠送NPC", "赠送皮肤", "赠送专属", "赠送专属物品",
-            "切换同伴", "切换角色", "更换角色", "选择角色", "NPC信息", "npc信息", "查询NPC",
+            "切换同伴", "切换角色", "更换角色", "选择角色", "切换", "NPC信息", "npc信息", "查询NPC",
             "角色信息", "每日打卡", "我的星币", "NPC仓库", "npc仓库", "我的NPC",
             "状态栏", "角色状态", "抽奖", "npc抽奖", "NPC抽奖", "星币", "钱包",
             "中奖号码", "开奖", "打卡", "查NPC", "同伴栏", "物品栏", "道具栏", "我的道具", "道具仓库", "使用道具", "使用",
@@ -1962,6 +1976,36 @@ class JubenNpcPlugin(Star):
         # numbers as a command prefix.
         return text
 
+    @staticmethod
+    def _strip_game_command_prefix(text: str) -> str:
+        """Accept the single-letter compatibility prefix shown in client logs.
+
+        The documented commands are wake-word free.  Some clients nevertheless
+        send an ``X`` prefix before one of the game commands; removing it only
+        when it is followed by a known command preserves ordinary messages.
+        """
+        return re.sub(
+            r"^[xX]\s*(?=(?:打卡|抽奖|状态栏|同伴栏|道具栏|切换(?:同伴|角色)?))",
+            "",
+            str(text or ""),
+        )
+
+    @staticmethod
+    def _parse_chinese_number(value: str) -> int:
+        """Parse the small Chinese page numerals used in ``同伴栏第二页``."""
+        digits = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+        units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+        total = current = 0
+        for char in value:
+            if char in digits:
+                current = digits[char]
+            elif char in units:
+                if current == 0:
+                    current = 1
+                total += current * units[char]
+                current = 0
+        return total + current
+
     def _parse_count(self, event: AstrMessageEvent, default: int, max_count: int) -> int:
         match = re.search(r"\d+", self._arg_text(event))
         if not match:
@@ -1969,10 +2013,12 @@ class JubenNpcPlugin(Star):
         return max(1, min(max_count, int(match.group())))
 
     def _parse_page(self, event: AstrMessageEvent, max_page: int = 999) -> int:
-        match = re.search(r"\d+", self._arg_text(event))
-        if not match:
-            return 1
-        return max(1, min(max_page, int(match.group())))
+        argument = self._arg_text(event)
+        if match := re.search(r"\d+", argument):
+            return max(1, min(max_page, int(match.group())))
+        if match := re.search(r"[〇零一二三四五六七八九十百千万两]+", argument):
+            return max(1, min(max_page, self._parse_chinese_number(match.group())))
+        return 1
 
     def _parse_transfer(self, event: AstrMessageEvent) -> Tuple[Optional[str], str, int]:
         text = event.message_str

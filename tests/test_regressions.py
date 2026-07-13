@@ -85,6 +85,9 @@ class CommandAndLayoutRegressionTests(unittest.TestCase):
         self.assertEqual(self.plugin._arg_text(Event("2")), "2")
         self.assertEqual(self.plugin._parse_page(Event("2")), 2)
         self.assertEqual(self.plugin._parse_page(Event("同伴栏第6页")), 6)
+        self.assertEqual(self.plugin._parse_page(Event("同伴栏第二页")), 2)
+        self.assertEqual(self.plugin._parse_page(Event("同伴栏二十页")), 20)
+        self.assertEqual(self.plugin._arg_text(Event("X同伴栏第二页")), "第二页")
         self.assertEqual(self.plugin._arg_text(Event("灵儿")), "灵儿")
         self.assertEqual(self.plugin._arg_text(Event("/切换同伴 灵儿")), "灵儿")
 
@@ -101,19 +104,26 @@ class CommandAndLayoutRegressionTests(unittest.TestCase):
 
         self.plugin.inventory_cmd = inventory
         self.plugin.switch_cmd = switch
+        self.plugin.characters = [{"id": "ling", "name": "灵儿", "base": "灵儿", "skin": "", "kind": PLUGIN.COMPANION_KIND}]
 
         async def collect(message):
             event = Event(message)
             results = [result async for result in self.plugin.direct_command_cmd(event)]
             return results, event.stopped
 
-        page_results, page_stopped = asyncio.run(collect("同伴栏第2页"))
+        page_results, page_stopped = asyncio.run(collect("X同伴栏第二页"))
         switch_results, switch_stopped = asyncio.run(collect("切换同伴 灵儿"))
+        compact_named_switch_results, compact_named_switch_stopped = asyncio.run(collect("切换同伴灵儿"))
+        compact_switch_results, compact_switch_stopped = asyncio.run(collect("切换灵儿"))
         self.assertEqual(page_results, ["inventory-result"])
         self.assertEqual(switch_results, ["switch-result"])
+        self.assertEqual(compact_named_switch_results, ["switch-result"])
+        self.assertEqual(compact_switch_results, ["switch-result"])
         self.assertTrue(page_stopped)
         self.assertTrue(switch_stopped)
-        self.assertEqual(calls, [("inventory", "同伴栏第2页"), ("switch", "切换同伴 灵儿")])
+        self.assertTrue(compact_named_switch_stopped)
+        self.assertTrue(compact_switch_stopped)
+        self.assertEqual(calls, [("inventory", "X同伴栏第二页"), ("switch", "切换同伴 灵儿"), ("switch", "切换同伴灵儿"), ("switch", "切换灵儿")])
 
     def test_legacy_item_tiers_migrate_to_one_weighted_item_pool(self):
         item = self.plugin._normalize_character({
