@@ -1,0 +1,159 @@
+{
+  "characters": [
+    {
+      "id": "blue_hour_cafe",
+      "name": "蓝时咖啡",
+      "base": "蓝时咖啡",
+      "skin": "Winter Issue",
+      "star": "SSR",
+      "route": "运营后台添加 / 月度皮肤池",
+      "bonus": "推理经验 +12%",
+      "intro": "银发女仆在蓝色午后里守着窗边席位，甜点、红茶和冰冷剑锋都摆放得恰到好处。",
+      "skills": [
+        [
+          "午后礼仪",
+          "社交与推理经验提升。"
+        ],
+        [
+          "蓝调侍奉",
+          "礼物转化经验 +15%。"
+        ],
+        [
+          "寒光茶歇",
+          "月度皮肤结算经验 +25%。"
+        ]
+      ],
+      "colors": [
+        "#7d9fc2",
+        "#eaf4ff",
+        "#1c2a3f"
+      ],
+      "image": "blue_hour_cafe.jpg",
+      "featured": true
+    },
+    {
+      "id": "noble_afternoon",
+      "name": "贵族下午茶",
+      "base": "贵族下午茶",
+      "skin": "Chess Strategy",
+      "star": "SSR",
+      "route": "运营后台添加 / 月度皮肤池",
+      "bonus": "策略经验 +12%",
+      "intro": "棋盘上的每一步都像一封无声邀请，她从容地把局势推进到最优雅的将死。",
+      "skills": [
+        [
+          "棋谱预判",
+          "机关与策略经验提升。"
+        ],
+        [
+          "临界一步",
+          "失败结算保底经验提升。"
+        ],
+        [
+          "贵族终局",
+          "高星剧本结算经验 +25%。"
+        ]
+      ],
+      "colors": [
+        "#31517f",
+        "#f3d98a",
+        "#2a2430"
+      ],
+      "image": "noble_afternoon.jpg",
+      "featured": true
+    },
+    {
+      "id": "cafe_lumiere",
+      "name": "红馆流明",
+      "base": "红馆流明",
+      "skin": "Cafe Lumiere",
+      "star": "SR",
+      "route": "运营后台添加 / 活动兑换",
+      "bonus": "社交经验 +10%",
+      "intro": "红色咖啡馆里，猫耳女仆以笑容招待来客，也用敏锐观察记录每一次停顿。",
+      "skills": [
+        [
+          "红茶礼节",
+          "社交经验提升。"
+        ],
+        [
+          "双影招待",
+          "组队结算额外获得经验。"
+        ],
+        [
+          "灯影谢幕",
+          "活动剧本经验 +20%。"
+        ]
+      ],
+      "colors": [
+        "#8b2531",
+        "#f4dfd8",
+        "#2b0f14"
+      ],
+      "image": "cafe_lumiere.jpg",
+      "featured": false
+    },
+    {
+      "id": "ash_silver_blade",
+      "name": "灰堡银刃",
+      "base": "灰堡银刃",
+      "skin": "Silver Blade",
+      "star": "SSR",
+      "route": "运营后台添加 / 月度大奖池",
+      "bonus": "战斗经验 +14%",
+      "intro": "黑衣少女坐在灰堡废墟里，银刃立于身侧，安静得像一场还未开始的审判。",
+      "skills": [
+        [
+          "灰堡伏击",
+          "战斗线经验提升。"
+        ],
+        [
+          "银刃处决",
+          "大奖重复转化经验提升。"
+        ],
+        [
+          "冷焰归鞘",
+          "战斗结算经验 +30%。"
+        ]
+      ],
+      "colors": [
+        "#505866",
+        "#dce6f0",
+        "#111419"
+      ],
+      "image": "ash_silver_blade.jpg",
+      "featured": true
+    },
+    {
+      "id": "blue_cafe_morning",
+      "name": "蓝咖啡晨光",
+      "base": "蓝咖啡晨光",
+      "skin": "Cafe Morning",
+      "star": "SR",
+      "route": "运营后台添加 / 皮肤池",
+      "bonus": "观察经验 +10%",
+      "intro": "晨光落在白瓷杯沿，银发女仆端起咖啡，仿佛连线索也被阳光洗得透明。",
+      "skills": [
+        [
+          "晨光注视",
+          "观察经验提升。"
+        ],
+        [
+          "白瓷回声",
+          "礼物经验小幅提升。"
+        ],
+        [
+          "蓝窗独白",
+          "探索结算经验 +20%。"
+        ]
+      ],
+      "colors": [
+        "#a8c6df",
+        "#f7fbff",
+        "#26384c"
+      ],
+      "image": "blue_cafe_morning.jpg",
+      "featured": false
+    }
+  ]
+}

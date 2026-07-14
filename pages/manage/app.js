@@ -1,0 +1,461 @@
+const PLUGIN = 'astrbot_plugin_juben_npc';
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const CHECKIN_TEXTS = {
+  title: { label: '标题', text: '{title}', x: 0.07, y: 0.14, size: 0.062, color: '#ffffff', bold: true },
+  reward: { label: '奖励', text: '{reward}', x: 0.08, y: 0.30, size: 0.042, color: '#eaf4ff', bold: true },
+  coins: { label: '星币', text: '当前星币：{coins}', x: 0.08, y: 0.41, size: 0.038, color: '#d7e6f5', bold: false },
+  message: { label: '附言', text: '{message}', x: 0.08, y: 0.58, size: 0.03, color: '#c8d9ea', bold: false },
+  user: { label: '打开者', text: '打开者：{user_name}', x: 0.08, y: 0.70, size: 0.027, color: '#b8cadd', bold: false },
+};
+const STATUS_TEXTS = {
+  user: { label: '打开者', text: '打开者：{user_name}｜ID：{user_id}', x: 0.45, y: 0.105, size: 0.02, color: '#6d9bc6', bold: false },
+  name: { label: '角色名', text: '{character_name}', x: 0.441, y: 0.19, size: 0.042, color: '#172033', bold: true },
+  subtitle: { label: '副标题', text: '{subtitle_name}  |  {quality}  |  {bonus}', x: 0.441, y: 0.265, size: 0.02, color: '#6d9bc6', bold: true },
+  stars: { label: '星级', text: '{stars}', x: 0.441, y: 0.323, size: 0.031, color: '#f5b642', bold: true },
+  level: { label: '等级经验', text: 'Lv.{level}  {current}/{need} EXP', x: 0.441, y: 0.39, size: 0.021, color: '#6d9bc6', bold: true },
+  skill_2_name: { label: '2星技能名（绑定）', text: '2星 {skill_2_name}', x: 0.457, y: 0.53, size: 0.02, color: '#ffffff', bold: true },
+  skill_2_desc: { label: '2星技能描述（绑定）', text: '{skill_2_desc}', x: 0.457, y: 0.573, size: 0.018, color: '#6d9bc6', bold: false },
+  skill_3_name: { label: '3星技能名（绑定）', text: '3星 {skill_3_name}', x: 0.457, y: 0.606, size: 0.02, color: '#ffffff', bold: true },
+  skill_3_desc: { label: '3星技能描述（绑定）', text: '{skill_3_desc}', x: 0.457, y: 0.649, size: 0.018, color: '#6d9bc6', bold: false },
+  skill_5_name: { label: '5星技能名（绑定）', text: '5星 {skill_5_name}', x: 0.457, y: 0.682, size: 0.02, color: '#ffffff', bold: true },
+  skill_5_desc: { label: '5星技能描述（绑定）', text: '{skill_5_desc}', x: 0.457, y: 0.725, size: 0.018, color: '#6d9bc6', bold: false },
+};
+const FONT_OPTIONS = [
+  ['inherit', '跟随模板字体'],
+  ['default', '默认中文字体'],
+  ['msyh', '微软雅黑'],
+  ['simhei', '黑体'],
+  ['simsun', '宋体'],
+  ['kaiti', '楷体'],
+];
+
+let characters = [];
+let players = [];
+let settings = {};
+let checkinTemplates = [];
+let statusTemplates = [];
+let selectedId = '';
+let selectedCheckinId = '';
+let selectedStatusId = '';
+let selectedFilter = 'all';
+let activeImagePasteHandler = null;
+let checkinPreviewTimer = 0;
+let statusPreviewTimer = 0;
+
+const bridge = () => window.AstrBotPluginPage || {};
+const endpoint = (path) => String(path || '').trim().replace(/^\/+/, '');
+const normalizeResponse = (result) => result?.data || result || {};
+
+async function parseResponse(response) {
+  const payload = await response.json();
+  if (!response.ok || payload?.status === 'error') throw new Error(payload?.message || `请求失败（HTTP ${response.status}）`);
+  return payload;
+}
+async function apiGet(path) {
+  const api = bridge(); const target = endpoint(path);
+  if (api.apiGet) return api.apiGet(target);
+  if (api.request) return api.request({ method: 'GET', path: target });
+  return parseResponse(await fetch(`/api/plug/${encodeURIComponent(PLUGIN)}/${target}`));
+}
+async function apiPost(path, data) {
+  const api = bridge(); const target = endpoint(path);
+  if (api.apiPost) return api.apiPost(target, data);
+  if (api.request) return api.request({ method: 'POST', path: target, data });
+  return parseResponse(await fetch(`/api/plug/${encodeURIComponent(PLUGIN)}/${target}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  }));
+}
+async function apiDelete(path) { return apiPost(`${path}/delete`, {}); }
+
+function fileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取图片失败，请重新选择文件。'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+}
+async function upload(path, file) {
+  const api = bridge(); const target = endpoint(path);
+  let bridgeError = null;
+  if (api.upload) {
+    try { return await api.upload(target, file); } catch (error) { bridgeError = error; }
+  }
+  if (api.apiPost && file && file.size <= 10 * 1024 * 1024) {
+    try {
+      return await api.apiPost(`${target}/data-url`, { filename: file.name || 'upload.png', data_url: await fileAsDataUrl(file) });
+    } catch (error) {
+      throw new Error(error?.message || bridgeError?.message || '图片上传失败');
+    }
+  }
+  if (bridgeError) throw bridgeError;
+  const form = new FormData(); form.append('file', file);
+  return parseResponse(await fetch(`/api/plug/${encodeURIComponent(PLUGIN)}/${target}`, { method: 'POST', body: form }));
+}
+
+function assetUrl(image, kind = 'assets') {
+  return image ? `/api/plug/${PLUGIN}/${kind}/${encodeURIComponent(image)}` : '';
+}
+function escapeHtml(value) {
+  return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+}
+function kindLabel(kind) {
+  return ({ companion: '同伴', skin: '皮肤', item: '道具', experience_ball: '经验球' })[kind] || '条目';
+}
+function exclusiveItemNames(entry) {
+  const raw = entry?.exclusive_items?.length ? entry.exclusive_items : (entry?.exclusive_item || '');
+  const values = Array.isArray(raw) ? raw : String(raw).split(/[\r\n,，;；]+/);
+  return [...new Set(values.map((value) => String(value?.name || value || '').trim()).filter(Boolean))];
+}
+function toast(message) {
+  const el = $('#toast'); el.textContent = message; el.classList.add('show');
+  window.setTimeout(() => el.classList.remove('show'), 2400);
+}
+function errorText(error) { return error?.message || '操作失败，请查看浏览器控制台。'; }
+async function safely(action) { try { await action(); } catch (error) { console.error(error); toast(errorText(error)); } }
+function confirmDelete(button, label) {
+  const now = Date.now(); const until = Number(button.dataset.confirmUntil || 0);
+  if (until > now) {
+    window.clearTimeout(Number(button.dataset.confirmTimer || 0));
+    button.textContent = button.dataset.defaultLabel || '删除';
+    delete button.dataset.confirmUntil; delete button.dataset.confirmTimer;
+    return true;
+  }
+  button.dataset.defaultLabel = button.textContent;
+  button.dataset.confirmUntil = String(now + 5000);
+  button.textContent = '再次点击确认';
+  toast(`请在 5 秒内再次点击，确认${label}。`);
+  button.dataset.confirmTimer = String(window.setTimeout(() => {
+    button.textContent = button.dataset.defaultLabel || '删除';
+    delete button.dataset.confirmUntil; delete button.dataset.confirmTimer;
+  }, 5000));
+  return false;
+}
+
+function setValue(form, name, value = '') { if (form?.elements?.[name]) form.elements[name].value = value ?? ''; }
+function setChecked(form, name, value = false) { if (form?.elements?.[name]) form.elements[name].checked = Boolean(value); }
+function numberValue(value, fallback = 0) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
+
+async function loadAll() {
+  const payload = normalizeResponse(await apiGet('/characters'));
+  characters = payload.characters || [];
+  players = payload.players || [];
+  settings = payload.settings || settings;
+  checkinTemplates = payload.checkin_templates || [];
+  statusTemplates = payload.status_templates || [];
+  if (!selectedId && characters[0]) selectedId = characters[0].id;
+  if (!selectedCheckinId && checkinTemplates[0]) selectedCheckinId = checkinTemplates[0].id;
+  if (!selectedStatusId && statusTemplates[0]) selectedStatusId = statusTemplates[0].id;
+  renderColorGroup(); renderList(); renderParentOptions(); renderBoundOptions(); renderPlayerOptions(); renderAssetOptions(); fillSettings();
+  fillCharacter(characters.find((entry) => entry.id === selectedId) || characters[0]);
+  renderTemplateList('checkin'); fillTemplate('checkin', checkinTemplates.find((entry) => entry.id === selectedCheckinId) || checkinTemplates[0]);
+  renderTemplateList('status'); fillTemplate('status', statusTemplates.find((entry) => entry.id === selectedStatusId) || statusTemplates[0]);
+}
+
+function renderColorGroup() {
+  const active = $('.color-tabs button.active')?.dataset.colorGroup || 'companion';
+  $$('[data-color-group]').forEach((element) => {
+    if (!element.matches('.color-tabs button')) element.hidden = element.dataset.colorGroup !== active;
+  });
+}
+function fillSettings() {
+  const form = $('#settings-form');
+  Object.entries(settings).forEach(([key, value]) => { if (form.elements[key]) form.elements[key].value = value; });
+}
+function readSettings() {
+  return Object.fromEntries($$('#settings-form input[type="color"]').map((input) => [input.name, input.value]));
+}
+
+function renderList() {
+  const list = $('#character-list'); list.innerHTML = '';
+  const addHeading = (text) => { const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = text; list.appendChild(heading); };
+  const addEntry = (entry) => {
+    const item = document.createElement('button'); item.type = 'button';
+    item.className = `character-item ${entry.id === selectedId ? 'active' : ''} ${entry.kind === 'skin' ? 'skin-entry' : ''}`;
+    const description = entry.kind === 'experience_ball'
+      ? `${entry.exp_amount || 0} EXP · 权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
+      : `${entry.english_name || entry.quality || entry.star || '—'} ${entry.in_pool ? '· 奖池' : ''}`;
+    item.innerHTML = `<img src="${entry.preview || assetUrl(entry.image)}" alt="" /><span><strong>${escapeHtml(entry.kind === 'skin' ? `↳ ${entry.name}` : entry.name)}</strong><span>${escapeHtml(description)}</span></span>`;
+    item.addEventListener('click', () => { selectedId = entry.id; renderList(); fillCharacter(entry); });
+    list.appendChild(item);
+  };
+  const filtered = selectedFilter === 'all' ? characters : characters.filter((entry) => entry.kind === selectedFilter);
+  ['companion', 'skin', 'item', 'experience_ball'].forEach((kind) => {
+    const entries = filtered.filter((entry) => entry.kind === kind).sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-CN'));
+    if (!entries.length) return;
+    addHeading(kindLabel(kind)); entries.forEach(addEntry);
+  });
+  if (!list.childElementCount) list.innerHTML = '<p class="empty">该分类暂无条目。</p>';
+}
+
+function renderParentOptions() {
+  const select = $('#parent-companion'); const previous = select.value;
+  select.innerHTML = '<option value="">请选择所属同伴</option>';
+  characters.filter((entry) => entry.kind === 'companion').forEach((entry) => {
+    const option = document.createElement('option'); option.value = entry.id; option.textContent = `${entry.name} / ${entry.english_name || '—'}`; select.appendChild(option);
+  });
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+}
+function renderBoundOptions() {
+  $$('.template-bound-entry').forEach((select) => {
+    const previous = select.value;
+    select.innerHTML = '<option value="">通用模板（所有未绑定角色）</option>';
+    ['companion', 'skin'].forEach((kind) => characters.filter((entry) => entry.kind === kind).forEach((entry) => {
+      const option = document.createElement('option'); option.value = entry.id; option.textContent = `${kindLabel(kind)} · ${entry.name}`; select.appendChild(option);
+    }));
+    if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  });
+}
+function renderPlayerOptions() {
+  const select = $('#known-player'); select.innerHTML = '<option value="">手动填写</option>';
+  players.forEach((player, index) => { const option = document.createElement('option'); option.value = String(index); option.textContent = `${player.name} / ${player.user_id} / ${player.scope_id}`; select.appendChild(option); });
+}
+function renderAssetOptions() {
+  const assetSelect = $('#asset-character'); assetSelect.innerHTML = '';
+  characters.filter((entry) => ['companion', 'skin', 'item'].includes(entry.kind)).forEach((entry) => {
+    const option = document.createElement('option'); option.value = entry.id; option.textContent = `${kindLabel(entry.kind)} · ${entry.name} / ${entry.english_name || entry.quality || '—'}`; assetSelect.appendChild(option);
+  });
+  const exclusive = $('#grant-exclusive'); exclusive.innerHTML = '<option value="">选择要发放的专属物品</option>';
+  characters.filter((entry) => entry.kind === 'companion').forEach((entry) => exclusiveItemNames(entry).forEach((name) => {
+    const option = document.createElement('option'); option.value = entry.id; option.dataset.exclusiveName = name; option.textContent = `${entry.name} · ${name}`; exclusive.appendChild(option);
+  }));
+}
+
+function toggleKindFields(kind) {
+  $$('.companion-only').forEach((element) => element.classList.toggle('hidden', kind !== 'companion'));
+  $$('.profile-only').forEach((element) => element.classList.toggle('hidden', !['companion', 'skin'].includes(kind)));
+  $$('.skin-only').forEach((element) => element.classList.toggle('hidden', kind !== 'skin'));
+  $$('.item-only').forEach((element) => element.classList.toggle('hidden', kind !== 'item'));
+  $$('.experience-only').forEach((element) => element.classList.toggle('hidden', kind !== 'experience_ball'));
+  const form = $('#character-form');
+  form.elements.quality.placeholder = kind === 'item' ? '普通 / 中级 / 高级' : (kind === 'experience_ball' ? '经验球' : 'SSR / SR / R');
+}
+function fillCharacter(entry) {
+  const form = $('#character-form');
+  if (!entry) { form.reset(); toggleKindFields('companion'); return; }
+  selectedId = entry.id;
+  setValue(form, 'kind', entry.kind || 'companion'); setValue(form, 'id', entry.id); setValue(form, 'name', entry.name); setValue(form, 'english_name', entry.english_name || entry.skin || '');
+  setValue(form, 'quality', entry.quality || entry.star || 'R'); setValue(form, 'parent_id', entry.parent_id || ''); setValue(form, 'exclusive_items', exclusiveItemNames(entry).join('\n'));
+  setValue(form, 'route', entry.route || ''); setValue(form, 'bonus', entry.bonus || ''); setValue(form, 'intro', entry.intro || ''); setValue(form, 'effect', entry.effect || ''); setValue(form, 'image', entry.image || '');
+  setValue(form, 'focal_x', entry.focal_x ?? 0.5); setValue(form, 'focal_y', entry.focal_y ?? 0.5); setValue(form, 'exp_amount', entry.exp_amount ?? 10); setValue(form, 'draw_weight', entry.draw_weight ?? 10); setChecked(form, 'in_pool', entry.in_pool);
+  const skills = entry.skills || []; [0, 1, 2].forEach((index) => { setValue(form, `skill${index}`, skills[index]?.[0] || ''); setValue(form, `skill${index}Desc`, skills[index]?.[1] || ''); });
+  $('#parent-companion').value = entry.parent_id || '';
+  toggleKindFields(entry.kind || 'companion');
+  $('#preview-image').src = entry.preview || assetUrl(entry.image); $('#preview-title').textContent = entry.name || '未命名条目';
+  $('#preview-subtitle').textContent = entry.kind === 'experience_ball' ? `抽中后直接 +${entry.exp_amount || 0} EXP，权重 ${entry.draw_weight || 1}` : `${kindLabel(entry.kind)} · ${entry.english_name || entry.quality || '—'}`;
+}
+function readCharacter() {
+  const form = $('#character-form'); const kind = form.elements.kind.value;
+  return {
+    id: form.elements.id.value.trim(), kind, name: form.elements.name.value.trim(), english_name: form.elements.english_name.value.trim(), quality: form.elements.quality.value.trim(), parent_id: form.elements.parent_id.value,
+    exclusive_items: form.elements.exclusive_items.value.trim(), route: form.elements.route.value.trim(), bonus: form.elements.bonus.value.trim(), intro: form.elements.intro.value.trim(), effect: form.elements.effect.value.trim(), image: form.elements.image.value.trim(), in_pool: form.elements.in_pool.checked,
+    focal_x: numberValue(form.elements.focal_x.value, 0.5), focal_y: numberValue(form.elements.focal_y.value, 0.5), exp_amount: numberValue(form.elements.exp_amount.value, 10), draw_weight: numberValue(form.elements.draw_weight.value, 10),
+    skills: [[form.elements.skill0.value.trim(), form.elements.skill0Desc.value.trim()], [form.elements.skill1.value.trim(), form.elements.skill1Desc.value.trim()], [form.elements.skill2.value.trim(), form.elements.skill2Desc.value.trim()]],
+  };
+}
+
+function blobAsFile(blob, fallback) {
+  if (blob instanceof File) return blob;
+  const extension = ({ 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/png': 'png' })[blob.type] || 'png';
+  return new File([blob], fallback.replace(/\.[^.]+$/, `.${extension}`), { type: blob.type || 'image/png' });
+}
+function bindImageDropzone(zoneSelector, inputSelector, handler, fallbackName) {
+  const zone = $(zoneSelector); const input = $(inputSelector);
+  input.addEventListener('change', () => safely(() => handler(input.files[0])));
+  zone.addEventListener('focus', () => { activeImagePasteHandler = handler; });
+  zone.addEventListener('click', () => { activeImagePasteHandler = handler; zone.focus(); input.click(); });
+  zone.addEventListener('dragover', (event) => { event.preventDefault(); zone.classList.add('dragging'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
+  zone.addEventListener('drop', (event) => { event.preventDefault(); zone.classList.remove('dragging'); safely(() => handler(event.dataTransfer.files[0])); });
+  zone.addEventListener('paste', (event) => {
+    const item = [...(event.clipboardData?.items || [])].find((candidate) => candidate.type?.startsWith('image/'));
+    if (!item) { toast('剪贴板中没有真实图片文件。'); return; }
+    event.preventDefault(); safely(() => handler(blobAsFile(item.getAsFile(), fallbackName)));
+  });
+  document.addEventListener('paste', (event) => {
+    if (event.defaultPrevented || activeImagePasteHandler !== handler) return;
+    const item = [...(event.clipboardData?.items || [])].find((candidate) => candidate.type?.startsWith('image/'));
+    if (!item) return;
+    event.preventDefault(); safely(() => handler(blobAsFile(item.getAsFile(), fallbackName)));
+  });
+  document.addEventListener('focusin', (event) => { if (!zone.contains(event.target)) activeImagePasteHandler = null; });
+}
+async function uploadEntryFile(file) {
+  if (!file?.type?.startsWith('image/')) { toast('请粘贴或选择真实图片文件；图片链接不能直接上传。'); return; }
+  const result = normalizeResponse(await upload('/upload-image', file));
+  if (!result.image) throw new Error('图片上传失败。');
+  $('#character-form').elements.image.value = result.image; $('#preview-image').src = URL.createObjectURL(file); toast('图片已上传，保存条目后生效。');
+}
+
+function templateDefaults(type) {
+  const texts = type === 'checkin' ? CHECKIN_TEXTS : STATUS_TEXTS;
+  return {
+    id: '', name: '', bound_entry_id: '', priority: 0, background_image: '', image: '', enabled: true, font_family: 'default',
+    ...(type === 'checkin' ? { messages: ['今日也要和同伴一起前进。', '线索会回应认真观察的人。', '和同伴一起，继续推进故事。', '今天的选择，也会留下新的线索。', '下一次相遇，或许就在转角。'] } : {}),
+    texts: Object.fromEntries(Object.entries(texts).map(([key, value]) => [key, { ...value }])),
+  };
+}
+function textRow(container, key, config, label = '') {
+  const row = document.createElement('div'); row.className = 'text-row'; row.dataset.textKey = key;
+  const selectedFont = FONT_OPTIONS.some(([value]) => value === config.font_family) ? config.font_family : 'inherit';
+  const fontOptions = FONT_OPTIONS.map(([value, text]) => `<option value="${value}"${value === selectedFont ? ' selected' : ''}>${text}</option>`).join('');
+  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" /><input data-field="x" type="number" min="0" max="1" step="0.01" /><input data-field="y" type="number" min="0" max="1" step="0.01" /><input data-field="size" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family">${fontOptions}</select><input data-field="color" type="color" /><label class="bold-control"><input data-field="bold" type="checkbox" /><span>加粗</span></label><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
+  row.querySelector('[data-field="text"]').value = config.text || '';
+  row.querySelector('[data-field="x"]').value = config.x ?? 0;
+  row.querySelector('[data-field="y"]').value = config.y ?? 0;
+  row.querySelector('[data-field="size"]').value = config.size ?? 0.03;
+  row.querySelector('[data-field="color"]').value = config.color || '#ffffff';
+  row.querySelector('[data-field="bold"]').checked = Boolean(config.bold);
+  row.querySelector('.remove-text').addEventListener('click', () => row.remove());
+  container.appendChild(row);
+}
+function buildTextRows(type, values = {}) {
+  const defaults = type === 'checkin' ? CHECKIN_TEXTS : STATUS_TEXTS;
+  const container = $(`#${type}-text-rows`); container.innerHTML = '';
+  const hasSavedRows = values && typeof values === 'object';
+  const keys = hasSavedRows ? Object.keys(values) : Object.keys(defaults);
+  keys.forEach((key) => textRow(container, key, { ...(defaults[key] || { label: key, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }), ...(values?.[key] || {}) }, defaults[key]?.label || key));
+}
+function readTextRows(type) {
+  const texts = {};
+  $$(`#${type}-text-rows .text-row`).forEach((row) => {
+    const key = row.dataset.textKey; if (!key) return;
+    const field = (name) => row.querySelector(`[data-field="${name}"]`);
+    texts[key] = { text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), font_family: field('font_family').value, color: field('color').value, bold: field('bold').checked };
+  });
+  return texts;
+}
+function renderTemplateList(type) {
+  const list = type === 'checkin' ? checkinTemplates : statusTemplates;
+  const selected = type === 'checkin' ? selectedCheckinId : selectedStatusId;
+  const element = $(`#${type}-template-list`); element.innerHTML = '';
+  const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = '背景文件 / 模板（可滚动）'; element.appendChild(heading);
+  list.forEach((template) => {
+    const item = document.createElement('button'); item.type = 'button'; item.className = `character-item ${template.id === selected ? 'active' : ''}`;
+    const binding = template.bound_entry_id ? (characters.find((entry) => entry.id === template.bound_entry_id)?.name || '已删除绑定') : '通用';
+    const filename = template.background_image || template.image || '尚未上传背景';
+    item.innerHTML = `<img src="${template.preview || assetUrl(filename, type === 'checkin' ? 'checkin-assets' : 'status-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}<br />背景：${escapeHtml(filename)}</span></span>`;
+    item.addEventListener('click', () => { if (type === 'checkin') selectedCheckinId = template.id; else selectedStatusId = template.id; renderTemplateList(type); fillTemplate(type, template); });
+    element.appendChild(item);
+  });
+  if (!element.childElementCount) element.innerHTML = '<p class="empty">暂无模板。</p>';
+}
+function fillTemplate(type, template) {
+  const form = $(`#${type}-template-form`); const data = template || templateDefaults(type);
+  setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setValue(form, 'font_family', data.font_family || 'default');
+  setValue(form, 'background_image', data.background_image || data.image || '');
+  setChecked(form, 'enabled', data.enabled !== false);
+  if (form.elements.messages) setValue(form, 'messages', (data.messages || []).join('\n'));
+  buildTextRows(type, data.texts);
+  const preview = $(`#${type}-preview`); const assetType = type === 'checkin' ? 'checkin-assets' : 'status-assets'; preview.src = data.preview || assetUrl(data.background_image || data.image, assetType);
+  schedulePreview(type);
+}
+function readTemplate(type) {
+  const form = $(`#${type}-template-form`);
+  return {
+    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), font_family: form.elements.font_family.value,
+    background_image: form.elements.background_image.value.trim(), enabled: form.elements.enabled.checked,
+    ...(type === 'checkin' ? { messages: form.elements.messages.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).slice(0, 5) } : {}), texts: readTextRows(type),
+  };
+}
+function schedulePreview(type) {
+  const timer = type === 'checkin' ? checkinPreviewTimer : statusPreviewTimer;
+  window.clearTimeout(timer);
+  const id = window.setTimeout(() => safely(() => updateTemplatePreview(type, true)), 450);
+  if (type === 'checkin') checkinPreviewTimer = id; else statusPreviewTimer = id;
+}
+async function updateTemplatePreview(type, quiet = false) {
+  const result = normalizeResponse(await apiPost(`/${type}-templates/preview`, readTemplate(type)));
+  if (!result.preview) throw new Error('后台没有返回预览图片。');
+  $(`#${type}-preview`).src = result.preview;
+  if (!quiet) toast(`已生成${type === 'checkin' ? '打卡' : '状态栏'}预览。`);
+}
+async function uploadTemplateLayer(type, field, file) {
+  if (!file?.type?.startsWith('image/')) { toast('请粘贴或选择真实图片文件。'); return; }
+  const result = normalizeResponse(await upload(type === 'checkin' ? '/upload-checkin-image' : '/upload-status-image', file));
+  if (!result.image) throw new Error('模板图片上传失败。');
+  $(`#${type}-template-form`).elements[field].value = result.image;
+  await updateTemplatePreview(type, true); toast('模板图片已上传。');
+}
+function addCustomText(type) {
+  const key = window.prompt('请输入文字字段 ID（英文、数字或下划线，例如 event）：', 'custom_text');
+  if (!key) return;
+  const safe = key.trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+  if (!safe) { toast('字段 ID 无效。'); return; }
+  if ($(`#${type}-text-rows .text-row[data-text-key="${safe}"]`)) { toast('该文字行已存在。'); return; }
+  textRow($(`#${type}-text-rows`), safe, { label: safe, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }, safe);
+  schedulePreview(type);
+}
+
+function assetPayload() {
+  return { scope_id: $('#asset-scope').value.trim(), user_id: $('#asset-user').value.trim(), name: $('#asset-name').value.trim() };
+}
+function bindEvents() {
+  $('#refresh').addEventListener('click', () => safely(loadAll));
+  $$('.type-filter button').forEach((button) => button.addEventListener('click', () => {
+    selectedFilter = button.dataset.filter; $$('.type-filter button').forEach((entry) => entry.classList.toggle('active', entry === button)); renderList();
+  }));
+  $$('.color-tabs button').forEach((button) => button.addEventListener('click', () => {
+    $$('.color-tabs button').forEach((entry) => entry.classList.toggle('active', entry === button)); renderColorGroup();
+  }));
+  $('#save-settings').addEventListener('click', () => safely(async () => {
+    const result = normalizeResponse(await apiPost('/settings', readSettings())); settings = result.settings || settings; toast('视觉色彩已保存。');
+  }));
+  $('#character-form').elements.kind.addEventListener('change', (event) => toggleKindFields(event.target.value));
+  $('#new-character').addEventListener('click', () => {
+    selectedId = ''; const form = $('#character-form'); form.reset(); form.elements.kind.value = 'companion'; form.elements.quality.value = 'SR'; form.elements.focal_x.value = '0.5'; form.elements.focal_y.value = '0.5'; form.elements.exp_amount.value = '10'; form.elements.draw_weight.value = '10';
+    toggleKindFields('companion'); $('#preview-image').removeAttribute('src'); $('#preview-title').textContent = '新增条目'; $('#preview-subtitle').textContent = '填写资料后上传图片；可调画面焦点。'; renderList();
+  });
+  $('#save-button').addEventListener('click', () => safely(async () => {
+    const data = readCharacter(); if (!data.id || !data.name) { toast('ID 和中文名称必填。'); return; } if (data.kind === 'skin' && !data.parent_id) { toast('皮肤必须选择所属同伴。'); return; }
+    $('#save-state').textContent = '保存中…'; const result = normalizeResponse(await apiPost('/characters', data)); $('#save-state').textContent = ''; selectedId = result.character?.id || data.id; toast('已保存条目。'); await loadAll();
+  }));
+  $('#delete-button').addEventListener('click', () => safely(async () => {
+    const id = $('#character-form').elements.id.value.trim(); if (!id || !confirmDelete($('#delete-button'), `删除总库条目 ${id}`)) return; await apiDelete(`/characters/${id}`); selectedId = ''; toast('已删除总库条目。'); await loadAll();
+  }));
+  bindImageDropzone('#image-dropzone', '#image-upload', uploadEntryFile, 'pasted-entry.png');
+
+  $('#known-player').addEventListener('change', (event) => {
+    const player = players[Number(event.target.value)]; if (!player) return; $('#asset-scope').value = player.scope_id; $('#asset-user').value = player.user_id; $('#asset-name').value = player.name;
+  });
+  $('#grant-button').addEventListener('click', () => safely(async () => {
+    const payload = { ...assetPayload(), character_id: $('#asset-character').value }; if (!payload.scope_id || !payload.user_id || !payload.character_id) { toast('请填写群/会话、用户和条目。'); return; }
+    const result = normalizeResponse(await apiPost('/grant', payload)); toast(result.created ? '已发放条目。' : '玩家已拥有该条目。'); await loadAll();
+  }));
+  $('#revoke-button').addEventListener('click', () => safely(async () => {
+    const payload = { ...assetPayload(), character_id: $('#asset-character').value, amount: numberValue($('#asset-amount').value, 1) }; if (!payload.scope_id || !payload.user_id || !payload.character_id) { toast('请填写群/会话、用户和条目。'); return; }
+    if (!confirmDelete($('#revoke-button'), '扣除玩家资产')) return;
+    const result = normalizeResponse(await apiPost('/revoke', payload)); toast(`已扣除，剩余：${result.result?.remaining ?? 0}`); await loadAll();
+  }));
+  $('#grant-exclusive-button').addEventListener('click', () => safely(async () => {
+    const select = $('#grant-exclusive'); const option = select.options[select.selectedIndex]; const payload = { ...assetPayload(), companion_id: select.value, exclusive_name: option?.dataset.exclusiveName || '' };
+    if (!payload.scope_id || !payload.user_id || !payload.companion_id || !payload.exclusive_name) { toast('请填写群/用户并选择专属物品。'); return; }
+    await apiPost('/grant-exclusive', payload); toast('已发放专属物品。'); await loadAll();
+  }));
+
+  ['checkin', 'status'].forEach((type) => {
+    $(`#new-${type}-template`).addEventListener('click', () => { if (type === 'checkin') selectedCheckinId = ''; else selectedStatusId = ''; fillTemplate(type, templateDefaults(type)); renderTemplateList(type); });
+    const form = $(`#${type}-template-form`); form.addEventListener('input', () => schedulePreview(type)); form.addEventListener('change', () => schedulePreview(type));
+    $(`#preview-${type}-template`).addEventListener('click', () => safely(() => updateTemplatePreview(type, false)));
+    $(`#save-${type}-template`).addEventListener('click', () => safely(async () => {
+      const template = readTemplate(type); if (!template.id || !template.name) { toast('模板 ID 和名称必填。'); return; }
+      const result = normalizeResponse(await apiPost(`/${type}-templates`, template)); if (type === 'checkin') selectedCheckinId = result.template?.id || template.id; else selectedStatusId = result.template?.id || template.id;
+      toast(`已保存${type === 'checkin' ? '打卡' : '状态栏'}模板。`); await loadAll();
+    }));
+    $(`#delete-${type}-template`).addEventListener('click', () => safely(async () => {
+      const id = form.elements.id.value.trim(); const button = $(`#delete-${type}-template`); if (!id || !confirmDelete(button, `删除${type === 'checkin' ? '打卡' : '状态栏'}模板 ${id}`)) return;
+      await apiDelete(`/${type}-templates/${id}`); if (type === 'checkin') selectedCheckinId = ''; else selectedStatusId = ''; toast('已删除模板。'); await loadAll();
+    }));
+    $(`#add-${type}-text`).addEventListener('click', () => addCustomText(type));
+    bindImageDropzone(`#${type}-background-dropzone`, `#${type}-background-upload`, (file) => uploadTemplateLayer(type, 'background_image', file), `pasted-${type}-background.png`);
+  });
+}
+
+async function boot() {
+  if (bridge().ready) await bridge().ready();
+  buildTextRows('checkin', CHECKIN_TEXTS); buildTextRows('status', STATUS_TEXTS); bindEvents(); await loadAll();
+}
+boot().catch((error) => { console.error(error); toast(errorText(error)); });
+window.addEventListener('unhandledrejection', (event) => { console.error(event.reason); toast(errorText(event.reason)); });
