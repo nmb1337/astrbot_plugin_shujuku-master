@@ -55,6 +55,7 @@ EXPERIENCE_BALL_KIND = "experience_ball"
 ITEM_QUALITIES = ("普通", "中级", "高级")
 QUALITY_RANK = {"UR": 5, "SSR": 4, "SR": 3, "R": 2, "N": 1, "普通": 1, "中级": 2, "高级": 3}
 FONT_FAMILIES = ("default", "msyh", "simhei", "simsun", "kaiti")
+IMAGE_FILE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 DEFAULT_VISUAL_SETTINGS = {
     "companion_name_color": "#172033",
     "companion_meta_color": "#6d9bc6",
@@ -154,7 +155,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     },
 ]
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡与抽奖插件", "2.3.0")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡与抽奖插件", "2.3.1")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -569,6 +570,12 @@ class JubenNpcPlugin(Star):
                         }
                         for template in self.status_templates
                     ],
+                    # Templates are not a file browser: an uploaded background
+                    # may exist before it is assigned to a template.  Return the
+                    # actual image directories separately so the Page can offer
+                    # operators a scrollable file list for both template types.
+                    "checkin_assets": self._list_visual_assets(self.checkin_assets_dir),
+                    "status_assets": self._list_visual_assets(self.status_assets_dir),
                 }
             )
 
@@ -1177,18 +1184,36 @@ class JubenNpcPlugin(Star):
             source = raw_source if isinstance(raw_source, dict) else {}
             text = str(source.get("text", defaults.get("text", "")) or "")[:180]
             color = str(source.get("color") or defaults.get("color", "#ffffff"))
-            item_family = str(source.get("font_family") or base["font_family"] or "default").lower()
+            item_family = self._normalize_text_font_family(source.get("font_family"))
             normalized_texts[safe_key] = {
                 "text": text,
                 "x": self._template_number(source.get("x"), float(defaults.get("x", 0.08)), 0, 1),
                 "y": self._template_number(source.get("y"), float(defaults.get("y", 0.72)), 0, 1),
                 "size": self._template_number(source.get("size"), float(defaults.get("size", 0.03)), 0.015, 0.15),
                 "color": color if re.fullmatch(r"#[0-9a-fA-F]{6}", color) else str(defaults.get("color", "#ffffff")),
-                "bold": bool(source.get("bold", defaults.get("bold", False))),
-                "font_family": item_family if item_family in FONT_FAMILIES else base["font_family"],
+                "bold": self._template_bool(source.get("bold", defaults.get("bold", False))),
+                # Keep the inheritance marker rather than replacing it with the
+                # template's current font.  Otherwise changing the template
+                # font later appears to do nothing for existing text rows.
+                "font_family": item_family,
             }
         base["texts"] = normalized_texts
         return base
+
+    @staticmethod
+    def _normalize_text_font_family(value: Any) -> str:
+        """Return a per-line font family or the explicit inheritance marker."""
+        family = str(value or "").strip().lower()
+        if not family or family == "inherit":
+            return "inherit"
+        return family if family in FONT_FAMILIES else "inherit"
+
+    @staticmethod
+    def _template_bool(value: Any) -> bool:
+        """Handle both JSON booleans and legacy string values predictably."""
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
 
     @staticmethod
     def _normalize_checkin_messages(value: Any) -> List[str]:
@@ -2295,6 +2320,31 @@ class JubenNpcPlugin(Star):
             logger.warning(f"生成后台图片预览失败：{path.name}，原因：{exc}")
             return ""
 
+    def _list_visual_assets(self, directory: Path) -> List[Dict[str, str]]:
+        """List operator-uploaded template backgrounds in a stable order.
+
+        The Page receives compact thumbnails because an AstrBot Plugin Page is
+        a sandboxed iframe and should not rely on direct Dashboard cookies for
+        image requests.  The list intentionally includes unassigned files.
+        """
+        if not directory.is_dir():
+            return []
+        files = sorted(
+            (
+                path
+                for path in directory.iterdir()
+                if path.is_file() and path.suffix.lower() in IMAGE_FILE_SUFFIXES
+            ),
+            key=lambda path: path.name.casefold(),
+        )
+        return [
+            {
+                "filename": path.name,
+                "preview": self._thumbnail_data_url(path, (160, 90)),
+            }
+            for path in files
+        ]
+
     def _ensure_fonts(self):
         if self._find_font_file(False) and self._find_font_file(True):
             return
@@ -2583,13 +2633,33 @@ class JubenNpcPlugin(Star):
             if not text:
                 continue
             font_size = max(14, int(float(item.get("size", 0.04)) * size[0]))
-            family = str(item.get("font_family") or template.get("font_family") or "default")
-            font = self._font(font_size, bool(item.get("bold")), family)
+            row_family = self._normalize_text_font_family(item.get("font_family"))
+            family = template.get("font_family", "default") if row_family == "inherit" else row_family
+            bold = self._template_bool(item.get("bold"))
+            font = self._font(font_size, bold, str(family))
             x = int(float(item.get("x", 0)) * size[0])
             y = int(float(item.get("y", 0)) * size[1])
             color = self._template_color(item.get("color"), "#ffffff")
-            draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 130))
-            draw.text((x, y), text, font=font, fill=color)
+            # Some system font files have no bold face.  A same-colour stroke
+            # makes the operator's "加粗" choice visibly effective even in
+            # that case, while still using a true bold font when available.
+            stroke_width = 1 if bold else 0
+            draw.text(
+                (x + 2, y + 2),
+                text,
+                font=font,
+                fill=(0, 0, 0, 130),
+                stroke_width=stroke_width,
+                stroke_fill=(0, 0, 0, 130),
+            )
+            draw.text(
+                (x, y),
+                text,
+                font=font,
+                fill=color,
+                stroke_width=stroke_width,
+                stroke_fill=color,
+            )
 
     def _render_checkin_card(
         self,

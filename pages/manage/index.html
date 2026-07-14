@@ -83,7 +83,16 @@
       <section class="board" id="checkin-board">
         <div class="board-title"><div><span>第二板块</span><h2>角色绑定的打卡背景与文字模板</h2><p>优先匹配当前皮肤，其次当前同伴，最后使用通用模板。每个模板只保留一张全背景，画框和排版由背景图完成。</p></div><button id="new-checkin-template" type="button">新增打卡模板</button></div>
         <div class="template-layout panel">
-          <aside id="checkin-template-list" class="character-list template-list"></aside>
+          <aside class="template-sidebar">
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>模板</h3><span>选择后编辑</span></div>
+              <div id="checkin-template-list" class="character-list template-list"></div>
+            </section>
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>背景文件</h3><span>点击即可使用</span></div>
+              <div id="checkin-asset-list" class="asset-file-list"></div>
+            </section>
+          </aside>
           <div class="template-editor">
             <form id="checkin-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_checkin" /></label><label>模板名称<input name="name" placeholder="灵儿打卡" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
@@ -106,7 +115,16 @@
       <section class="board" id="status-board">
         <div class="board-title"><div><span>第三板块</span><h2>角色绑定的状态栏模板</h2><p>模板只保留全背景与文字。经验条已移除；同伴或皮肤填写的经验加成、2/3/5 星技能可在文字行中绑定并调位置。</p></div><button id="new-status-template" type="button">新增状态模板</button></div>
         <div class="template-layout panel">
-          <aside id="status-template-list" class="character-list template-list"></aside>
+          <aside class="template-sidebar">
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>模板</h3><span>选择后编辑</span></div>
+              <div id="status-template-list" class="character-list template-list"></div>
+            </section>
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>背景文件</h3><span>点击即可使用</span></div>
+              <div id="status-asset-list" class="asset-file-list"></div>
+            </section>
+          </aside>
           <div class="template-editor">
             <form id="status-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_status" /></label><label>模板名称<input name="name" placeholder="灵儿状态栏" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>

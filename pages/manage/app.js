@@ -36,6 +36,8 @@ let players = [];
 let settings = {};
 let checkinTemplates = [];
 let statusTemplates = [];
+let checkinAssets = [];
+let statusAssets = [];
 let selectedId = '';
 let selectedCheckinId = '';
 let selectedStatusId = '';
@@ -145,6 +147,8 @@ async function loadAll() {
   settings = payload.settings || settings;
   checkinTemplates = payload.checkin_templates || [];
   statusTemplates = payload.status_templates || [];
+  checkinAssets = payload.checkin_assets || [];
+  statusAssets = payload.status_assets || [];
   if (!selectedId && characters[0]) selectedId = characters[0].id;
   if (!selectedCheckinId && checkinTemplates[0]) selectedCheckinId = checkinTemplates[0].id;
   if (!selectedStatusId && statusTemplates[0]) selectedStatusId = statusTemplates[0].id;
@@ -152,6 +156,7 @@ async function loadAll() {
   fillCharacter(characters.find((entry) => entry.id === selectedId) || characters[0]);
   renderTemplateList('checkin'); fillTemplate('checkin', checkinTemplates.find((entry) => entry.id === selectedCheckinId) || checkinTemplates[0]);
   renderTemplateList('status'); fillTemplate('status', statusTemplates.find((entry) => entry.id === selectedStatusId) || statusTemplates[0]);
+  renderTemplateAssetList('checkin'); renderTemplateAssetList('status');
 }
 
 function renderColorGroup() {
@@ -308,7 +313,14 @@ function textRow(container, key, config, label = '') {
   row.querySelector('[data-field="size"]').value = config.size ?? 0.03;
   row.querySelector('[data-field="color"]').value = config.color || '#ffffff';
   row.querySelector('[data-field="bold"]').checked = Boolean(config.bold);
-  row.querySelector('.remove-text').addEventListener('click', () => row.remove());
+  row.querySelector('.remove-text').addEventListener('click', () => {
+    row.remove();
+    // Deletion is part of the live template state.  Refresh the shared
+    // renderer just like edits do, so the operator can confirm immediately
+    // that the line is gone before saving the template.
+    const type = container.id.replace(/-text-rows$/, '');
+    if (type === 'checkin' || type === 'status') schedulePreview(type);
+  });
   container.appendChild(row);
 }
 function buildTextRows(type, values = {}) {
@@ -342,6 +354,29 @@ function renderTemplateList(type) {
   });
   if (!element.childElementCount) element.innerHTML = '<p class="empty">暂无模板。</p>';
 }
+function renderTemplateAssetList(type) {
+  const assets = type === 'checkin' ? checkinAssets : statusAssets;
+  const element = $(`#${type}-asset-list`); const form = $(`#${type}-template-form`);
+  const selectedFile = form.elements.background_image.value.trim(); element.innerHTML = '';
+  if (!assets.length) {
+    element.innerHTML = '<p class="empty">暂无背景文件。上传背景后会显示在这里。</p>';
+    return;
+  }
+  assets.forEach((asset) => {
+    const filename = String(asset.filename || ''); if (!filename) return;
+    const item = document.createElement('button'); item.type = 'button';
+    item.className = `asset-file-item ${filename === selectedFile ? 'active' : ''}`;
+    const image = document.createElement('img'); image.src = asset.preview || ''; image.alt = '';
+    const copy = document.createElement('span'); const name = document.createElement('strong'); const hint = document.createElement('span');
+    name.textContent = filename; hint.textContent = filename === selectedFile ? '当前背景' : '点击设为当前背景'; copy.append(name, hint); item.append(image, copy);
+    item.addEventListener('click', () => {
+      form.elements.background_image.value = filename;
+      $(`#${type}-preview`).src = asset.preview || '';
+      renderTemplateAssetList(type); schedulePreview(type); toast('已选择背景文件，保存模板后生效。');
+    });
+    element.appendChild(item);
+  });
+}
 function fillTemplate(type, template) {
   const form = $(`#${type}-template-form`); const data = template || templateDefaults(type);
   setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setValue(form, 'font_family', data.font_family || 'default');
@@ -350,6 +385,7 @@ function fillTemplate(type, template) {
   if (form.elements.messages) setValue(form, 'messages', (data.messages || []).join('\n'));
   buildTextRows(type, data.texts);
   const preview = $(`#${type}-preview`); const assetType = type === 'checkin' ? 'checkin-assets' : 'status-assets'; preview.src = data.preview || assetUrl(data.background_image || data.image, assetType);
+  renderTemplateAssetList(type);
   schedulePreview(type);
 }
 function readTemplate(type) {
@@ -377,6 +413,9 @@ async function uploadTemplateLayer(type, field, file) {
   const result = normalizeResponse(await upload(type === 'checkin' ? '/upload-checkin-image' : '/upload-status-image', file));
   if (!result.image) throw new Error('模板图片上传失败。');
   $(`#${type}-template-form`).elements[field].value = result.image;
+  const assets = type === 'checkin' ? checkinAssets : statusAssets;
+  if (!assets.some((asset) => asset.filename === result.image)) assets.unshift({ filename: result.image, preview: URL.createObjectURL(file) });
+  renderTemplateAssetList(type);
   await updateTemplatePreview(type, true); toast('模板图片已上传。');
 }
 function addCustomText(type) {
