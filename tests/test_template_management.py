@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import logging
 import sys
@@ -9,6 +10,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageChops, ImageDraw
 
@@ -95,7 +97,8 @@ class TemplateManagementTests(unittest.TestCase):
                         "y": 0.42,
                         "size": 0.035,
                         "font_family": "inherit",
-                        "bold": "false",
+                        "weight": "heavy",
+                        "shadow": "false",
                     }
                 },
             }
@@ -103,7 +106,9 @@ class TemplateManagementTests(unittest.TestCase):
 
         self.assertEqual(set(template["texts"]), {"custom"})
         self.assertEqual(template["texts"]["custom"]["font_family"], "inherit")
-        self.assertFalse(template["texts"]["custom"]["bold"])
+        self.assertEqual(template["texts"]["custom"]["weight"], "heavy")
+        self.assertTrue(template["texts"]["custom"]["bold"])
+        self.assertFalse(template["texts"]["custom"]["shadow"])
 
     def test_message_limit_and_boolean_normalization(self):
         instance = plugin_instance()
@@ -111,6 +116,7 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertTrue(instance._template_bool("true"))
         self.assertFalse(instance._template_bool("false"))
         self.assertEqual(instance._normalize_text_font_family("not-a-font"), "inherit")
+        self.assertEqual(instance._normalize_text_font_family("youyuan"), "youyuan")
 
     def test_background_file_list_uses_only_supported_images(self):
         instance = plugin_instance()
@@ -218,6 +224,121 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertEqual(captured["bonus"], "皮肤经验 +12%")
         self.assertEqual(captured["skill_2_name"], "皮肤二星")
         self.assertEqual(captured["skill_5_desc"], "皮肤五星描述")
+
+    def test_status_progress_is_template_bound_and_positioned(self):
+        instance = plugin_instance()
+        companion = {
+            "id": "linger", "kind": PLUGIN.COMPANION_KIND, "name": "灵儿",
+            "english_name": "Linger", "quality": "SR", "bonus": "", "skills": [],
+            "colors": ["#123456", "#abcdef", "#0f172a"],
+        }
+        instance.characters = [companion]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            instance.status_assets_dir = directory
+            instance.font_dir = directory
+            Image.new("RGB", (1280, 840), "white").save(directory / "status.png")
+            template = instance._normalize_status_template({
+                "id": "status", "name": "状态", "background_image": "status.png", "texts": {},
+                "progress": {
+                    "enabled": True, "x": 0.1, "y": 0.1, "width": 0.5, "height": 0.04,
+                    "background_color": "#112233", "color": "#cc0000",
+                },
+            })
+            image = instance._compose_status_image(
+                template,
+                {"user_id": "1", "name": "测试", "npcs": {"linger": {"exp": 500}}, "skins": {}, "current_skin": ""},
+                companion,
+            )
+
+        self.assertEqual(template["progress"]["x"], 0.1)
+        self.assertEqual(template["progress"]["height"], 0.04)
+        self.assertEqual(image.getpixel((300, 100))[:3], (204, 0, 0))
+        self.assertEqual(image.getpixel((600, 100))[:3], (17, 34, 51))
+
+    def test_page_shortcuts_and_bare_switch_command_are_accepted(self):
+        instance = plugin_instance()
+
+        class Event:
+            def __init__(self, message):
+                self.message_str = message
+                self.stopped = False
+
+            def stop_event(self):
+                self.stopped = True
+
+        async def fake_inventory(_event):
+            yield "inventory"
+
+        async def fake_switch(_event):
+            yield "switch"
+
+        instance.inventory_cmd = fake_inventory
+        instance.switch_cmd = fake_switch
+        page_event = Event("同伴栏第二页")
+        switch_event = Event("切换同伴灵儿")
+
+        async def collect(event):
+            return [result async for result in instance.direct_command_cmd(event)]
+
+        self.assertEqual(instance._parse_page(page_event), 2)
+        self.assertEqual(instance._parse_page(Event("同伴栏2")), 2)
+        self.assertEqual(asyncio.run(collect(page_event)), ["inventory"])
+        self.assertTrue(page_event.stopped)
+        self.assertEqual(asyncio.run(collect(switch_event)), ["switch"])
+        self.assertTrue(switch_event.stopped)
+
+    def test_all_items_use_one_weighted_draw_pool(self):
+        instance = plugin_instance()
+        instance.characters = [
+            {"id": "normal", "kind": PLUGIN.ITEM_KIND, "name": "普通", "in_pool": True, "draw_weight": 1},
+            {"id": "rare", "kind": PLUGIN.ITEM_KIND, "name": "自定义品质", "in_pool": True, "draw_weight": 9},
+        ]
+        captured = {}
+
+        def choose(entries, weights, k):
+            captured["weights"] = weights
+            return [entries[-1]]
+
+        instance._grant_draw_entry = lambda _player, entry, label: {"id": entry["id"], "label": label}
+        player = {"current_npc": "linger", "draw_state": {"pity_count": 0, "next_pity_kind": "random"}}
+        with patch.object(PLUGIN.random, "random", return_value=0.80), patch.object(PLUGIN.random, "choices", side_effect=choose):
+            result = instance._roll_draw(player)
+
+        self.assertEqual(captured["weights"], [1, 9])
+        self.assertEqual(result, {"id": "rare", "label": "道具"})
+
+    def test_inventory_can_keep_six_companion_groups_on_one_page(self):
+        instance = plugin_instance()
+        companions = [
+            {
+                "id": f"companion_{index}", "kind": PLUGIN.COMPANION_KIND, "name": f"同伴{index}",
+                "english_name": "Companion", "quality": "SR", "bonus": "", "skills": [],
+                "exclusive_items": ["物品甲", "物品乙", "物品丙"], "colors": ["#123456", "#abcdef", "#0f172a"],
+                "image": f"companion_{index}.png", "focal_x": 0.5, "focal_y": 0.5,
+            }
+            for index in range(6)
+        ]
+        instance.characters = companions
+        instance.settings = {
+            "companion_name_color": "#172033", "companion_meta_color": "#526071", "companion_border_color": "#d0d6e2",
+            "exclusive_item_color": "#2563eb", "exclusive_item_border_color": "#94b6e9",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            instance.assets_dir = directory / "assets"; instance.assets_dir.mkdir()
+            instance.render_dir = directory / "rendered"; instance.render_dir.mkdir()
+            instance.font_dir = directory / "fonts"; instance.font_dir.mkdir()
+            player = {
+                "user_id": "1", "name": "测试", "npcs": {entry["id"]: {"exp": 300} for entry in companions},
+                "skins": {}, "items": {}, "exclusive_items": {}, "current_npc": "companion_0", "current_skin": "",
+            }
+            path = instance._render_inventory(player, page=1)
+            with Image.open(path) as image:
+                size = image.size
+
+        self.assertTrue(path.name.endswith("_1.png"))
+        self.assertGreaterEqual(size[1], 900)
 
 
 if __name__ == "__main__":

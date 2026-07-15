@@ -26,10 +26,17 @@ const FONT_OPTIONS = [
   ['inherit', '跟随模板字体'],
   ['default', '默认中文字体'],
   ['msyh', '微软雅黑'],
+  ['msyh_light', '微软雅黑细体'],
+  ['deng', '等线'],
   ['simhei', '黑体'],
   ['simsun', '宋体'],
   ['kaiti', '楷体'],
+  ['youyuan', '幼圆（圆润）'],
+  ['xingkai', '华文行楷（手写）'],
+  ['cute', '圆润可爱（可替换）'],
+  ['comic', '手写卡通（可替换）'],
 ];
+const TEXT_WEIGHT_OPTIONS = [['regular', '常规'], ['bold', '粗'], ['heavy', '特粗']];
 
 let characters = [];
 let players = [];
@@ -181,6 +188,8 @@ function renderList() {
     item.className = `character-item ${entry.id === selectedId ? 'active' : ''} ${entry.kind === 'skin' ? 'skin-entry' : ''}`;
     const description = entry.kind === 'experience_ball'
       ? `${entry.exp_amount || 0} EXP · 权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
+      : entry.kind === 'item'
+        ? `${entry.quality || '未标注品质'} · 抽取权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
       : `${entry.english_name || entry.quality || entry.star || '—'} ${entry.in_pool ? '· 奖池' : ''}`;
     item.innerHTML = `<img src="${entry.preview || assetUrl(entry.image)}" alt="" /><span><strong>${escapeHtml(entry.kind === 'skin' ? `↳ ${entry.name}` : entry.name)}</strong><span>${escapeHtml(description)}</span></span>`;
     item.addEventListener('click', () => { selectedId = entry.id; renderList(); fillCharacter(entry); });
@@ -234,8 +243,9 @@ function toggleKindFields(kind) {
   $$('.skin-only').forEach((element) => element.classList.toggle('hidden', kind !== 'skin'));
   $$('.item-only').forEach((element) => element.classList.toggle('hidden', kind !== 'item'));
   $$('.experience-only').forEach((element) => element.classList.toggle('hidden', kind !== 'experience_ball'));
+  $$('.draw-weight').forEach((element) => element.classList.toggle('hidden', !['item', 'experience_ball'].includes(kind)));
   const form = $('#character-form');
-  form.elements.quality.placeholder = kind === 'item' ? '普通 / 中级 / 高级' : (kind === 'experience_ball' ? '经验球' : 'SSR / SR / R');
+  form.elements.quality.placeholder = kind === 'item' ? '普通 / 中级 / 高级（仅展示）' : (kind === 'experience_ball' ? '经验球' : 'SSR / SR / R');
 }
 function fillCharacter(entry) {
   const form = $('#character-form');
@@ -249,7 +259,11 @@ function fillCharacter(entry) {
   $('#parent-companion').value = entry.parent_id || '';
   toggleKindFields(entry.kind || 'companion');
   $('#preview-image').src = entry.preview || assetUrl(entry.image); $('#preview-title').textContent = entry.name || '未命名条目';
-  $('#preview-subtitle').textContent = entry.kind === 'experience_ball' ? `抽中后直接 +${entry.exp_amount || 0} EXP，权重 ${entry.draw_weight || 1}` : `${kindLabel(entry.kind)} · ${entry.english_name || entry.quality || '—'}`;
+  $('#preview-subtitle').textContent = entry.kind === 'experience_ball'
+    ? `抽中后直接 +${entry.exp_amount || 0} EXP，权重 ${entry.draw_weight || 1}`
+    : entry.kind === 'item'
+      ? `${kindLabel(entry.kind)} · ${entry.quality || '未标注品质'} · 抽取权重 ${entry.draw_weight || 1}`
+      : `${kindLabel(entry.kind)} · ${entry.english_name || entry.quality || '—'}`;
 }
 function readCharacter() {
   const form = $('#character-form'); const kind = form.elements.kind.value;
@@ -299,6 +313,7 @@ function templateDefaults(type) {
   return {
     id: '', name: '', bound_entry_id: '', priority: 0, background_image: '', image: '', enabled: true, font_family: 'default',
     ...(type === 'checkin' ? { messages: ['今日也要和同伴一起前进。', '线索会回应认真观察的人。', '和同伴一起，继续推进故事。', '今天的选择，也会留下新的线索。', '下一次相遇，或许就在转角。'] } : {}),
+    ...(type === 'status' ? { progress: { enabled: true, x: 0.441, y: 0.440, width: 0.455, height: 0.043, background_color: '#dbe2ef', color: '' } } : {}),
     texts: Object.fromEntries(Object.entries(texts).map(([key, value]) => [key, { ...value }])),
   };
 }
@@ -306,13 +321,16 @@ function textRow(container, key, config, label = '') {
   const row = document.createElement('div'); row.className = 'text-row'; row.dataset.textKey = key;
   const selectedFont = FONT_OPTIONS.some(([value]) => value === config.font_family) ? config.font_family : 'inherit';
   const fontOptions = FONT_OPTIONS.map(([value, text]) => `<option value="${value}"${value === selectedFont ? ' selected' : ''}>${text}</option>`).join('');
-  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" /><input data-field="x" type="number" min="0" max="1" step="0.01" /><input data-field="y" type="number" min="0" max="1" step="0.01" /><input data-field="size" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family">${fontOptions}</select><input data-field="color" type="color" /><label class="bold-control"><input data-field="bold" type="checkbox" /><span>加粗</span></label><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
+  const selectedWeight = TEXT_WEIGHT_OPTIONS.some(([value]) => value === config.weight)
+    ? config.weight : (config.bold ? 'bold' : 'regular');
+  const weightOptions = TEXT_WEIGHT_OPTIONS.map(([value, text]) => `<option value="${value}"${value === selectedWeight ? ' selected' : ''}>${text}</option>`).join('');
+  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" /><input data-field="x" type="number" min="0" max="1" step="0.01" /><input data-field="y" type="number" min="0" max="1" step="0.01" /><input data-field="size" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family">${fontOptions}</select><input data-field="color" type="color" /><select data-field="weight">${weightOptions}</select><label class="shadow-control"><input data-field="shadow" type="checkbox" /><span>阴影</span></label><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
   row.querySelector('[data-field="text"]').value = config.text || '';
   row.querySelector('[data-field="x"]').value = config.x ?? 0;
   row.querySelector('[data-field="y"]').value = config.y ?? 0;
   row.querySelector('[data-field="size"]').value = config.size ?? 0.03;
   row.querySelector('[data-field="color"]').value = config.color || '#ffffff';
-  row.querySelector('[data-field="bold"]').checked = Boolean(config.bold);
+  row.querySelector('[data-field="shadow"]').checked = config.shadow !== false;
   row.querySelector('.remove-text').addEventListener('click', () => {
     row.remove();
     // Deletion is part of the live template state.  Refresh the shared
@@ -335,7 +353,8 @@ function readTextRows(type) {
   $$(`#${type}-text-rows .text-row`).forEach((row) => {
     const key = row.dataset.textKey; if (!key) return;
     const field = (name) => row.querySelector(`[data-field="${name}"]`);
-    texts[key] = { text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), font_family: field('font_family').value, color: field('color').value, bold: field('bold').checked };
+    const weight = field('weight').value;
+    texts[key] = { text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), font_family: field('font_family').value, color: field('color').value, weight, bold: weight !== 'regular', shadow: field('shadow').checked };
   });
   return texts;
 }
@@ -382,6 +401,13 @@ function fillTemplate(type, template) {
   setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setValue(form, 'font_family', data.font_family || 'default');
   setValue(form, 'background_image', data.background_image || data.image || '');
   setChecked(form, 'enabled', data.enabled !== false);
+  if (type === 'status') {
+    const progress = { ...templateDefaults('status').progress, ...(data.progress || {}) };
+    setChecked(form, 'progress_enabled', progress.enabled !== false); setValue(form, 'progress_x', progress.x); setValue(form, 'progress_y', progress.y);
+    setValue(form, 'progress_width', progress.width); setValue(form, 'progress_height', progress.height);
+    setValue(form, 'progress_background_color', progress.background_color); setValue(form, 'progress_color', progress.color || '#6d9bc6');
+    setChecked(form, 'progress_auto_color', !progress.color);
+  }
   if (form.elements.messages) setValue(form, 'messages', (data.messages || []).join('\n'));
   buildTextRows(type, data.texts);
   const preview = $(`#${type}-preview`); const assetType = type === 'checkin' ? 'checkin-assets' : 'status-assets'; preview.src = data.preview || assetUrl(data.background_image || data.image, assetType);
@@ -393,7 +419,9 @@ function readTemplate(type) {
   return {
     id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), font_family: form.elements.font_family.value,
     background_image: form.elements.background_image.value.trim(), enabled: form.elements.enabled.checked,
-    ...(type === 'checkin' ? { messages: form.elements.messages.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).slice(0, 5) } : {}), texts: readTextRows(type),
+    ...(type === 'checkin' ? { messages: form.elements.messages.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).slice(0, 5) } : {}),
+    ...(type === 'status' ? { progress: { enabled: form.elements.progress_enabled.checked, x: numberValue(form.elements.progress_x.value, 0.441), y: numberValue(form.elements.progress_y.value, 0.440), width: numberValue(form.elements.progress_width.value, 0.455), height: numberValue(form.elements.progress_height.value, 0.043), background_color: form.elements.progress_background_color.value, color: form.elements.progress_auto_color.checked ? '' : form.elements.progress_color.value } } : {}),
+    texts: readTextRows(type),
   };
 }
 function schedulePreview(type) {
@@ -419,12 +447,19 @@ async function uploadTemplateLayer(type, field, file) {
   await updateTemplatePreview(type, true); toast('模板图片已上传。');
 }
 function addCustomText(type) {
-  const key = window.prompt('请输入文字字段 ID（英文、数字或下划线，例如 event）：', 'custom_text');
-  if (!key) return;
-  const safe = key.trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
-  if (!safe) { toast('字段 ID 无效。'); return; }
-  if ($(`#${type}-text-rows .text-row[data-text-key="${safe}"]`)) { toast('该文字行已存在。'); return; }
-  textRow($(`#${type}-text-rows`), safe, { label: safe, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }, safe);
+  let serial = 1; let safe = 'custom_text';
+  while ($(`#${type}-text-rows .text-row[data-text-key="${safe}"]`)) { serial += 1; safe = `custom_text_${serial}`; }
+  // Do not depend on window.prompt: it is commonly disabled in the plugin
+  // page iframe, which made the original add action appear to do nothing.
+  textRow($(`#${type}-text-rows`), safe, { label: '自定义文字', text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', weight: 'regular', shadow: true }, '自定义文字');
+  schedulePreview(type);
+}
+function addPresetText(type) {
+  const select = $(`#${type}-preset-text`); const key = select?.value;
+  const defaults = type === 'status' ? STATUS_TEXTS : CHECKIN_TEXTS;
+  if (!key || !defaults[key]) { toast('请选择可添加的预设字段。'); return; }
+  if ($(`#${type}-text-rows .text-row[data-text-key="${key}"]`)) { toast('该预设字段已在文字列表中。'); return; }
+  textRow($(`#${type}-text-rows`), key, { ...defaults[key] }, defaults[key].label || key);
   schedulePreview(type);
 }
 
@@ -488,6 +523,8 @@ function bindEvents() {
       await apiDelete(`/${type}-templates/${id}`); if (type === 'checkin') selectedCheckinId = ''; else selectedStatusId = ''; toast('已删除模板。'); await loadAll();
     }));
     $(`#add-${type}-text`).addEventListener('click', () => addCustomText(type));
+    const presetButton = $(`#add-${type}-preset-text`);
+    if (presetButton) presetButton.addEventListener('click', () => addPresetText(type));
     bindImageDropzone(`#${type}-background-dropzone`, `#${type}-background-upload`, (file) => uploadTemplateLayer(type, 'background_image', file), `pasted-${type}-background.png`);
   });
 }

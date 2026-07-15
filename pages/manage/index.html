@@ -56,7 +56,7 @@
               <label>ID<input name="id" required placeholder="linger" /></label>
               <label>中文名称<input name="name" required placeholder="灵儿 / 星辰经验球" /></label>
               <label>英文名 / 副标题<input name="english_name" placeholder="Blue Predator" /></label>
-              <label>品质<input name="quality" placeholder="SSR / 普通 / 经验球" /></label>
+              <label>品质<input name="quality" placeholder="SSR / 普通（仅展示）/ 经验球" /></label>
               <label class="skin-only">所属同伴<select name="parent_id" id="parent-companion"></select></label>
               <label class="companion-only wide">专属物品（每行一件）<textarea name="exclusive_items" rows="3" placeholder="灵儿的信物&#10;灵儿的徽章"></textarea></label>
               <label>图片文件<input name="image" placeholder="上传后自动填入" /></label>
@@ -67,7 +67,7 @@
               <label class="profile-only wide">经验加成<input name="bonus" placeholder="推理经验 +10%" /></label>
               <label class="item-only wide">道具效果<textarea name="effect" rows="2" placeholder="玩家使用后展示的效果说明"></textarea></label>
               <label class="experience-only">增加经验<input name="exp_amount" type="number" min="1" max="999999" value="10" /></label>
-              <label class="experience-only">抽取权重<input name="draw_weight" type="number" min="1" max="1000" value="10" /></label>
+              <label class="draw-weight">抽取权重<input name="draw_weight" type="number" min="1" max="1000" value="10" /></label>
               <input name="intro" type="hidden" />
               <label class="profile-only">2星技能名<input name="skill0" /></label><label class="profile-only">2星技能描述<input name="skill0Desc" /></label>
               <label class="profile-only">3星技能名<input name="skill1" /></label><label class="profile-only">3星技能描述<input name="skill1Desc" /></label>
@@ -96,11 +96,11 @@
           <div class="template-editor">
             <form id="checkin-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_checkin" /></label><label>模板名称<input name="name" placeholder="灵儿打卡" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="msyh_light">微软雅黑细体</option><option value="deng">等线</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="youyuan">幼圆（圆润）</option><option value="xingkai">华文行楷（手写）</option><option value="cute">圆润可爱（可替换）</option><option value="comic">手写卡通（可替换）</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
               <label class="wide">随机附言（最多 5 条，每次成功打卡随机使用一条）<textarea name="messages" rows="5" placeholder="每行一条随机附言"></textarea></label>
               <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label>
               <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{message}</code>、<code>{date}</code>、<code>{user_name}</code>、<code>{user_id}</code>。<code>{message}</code> 的位置由下方文字行控制。</div>
-              <div class="wide text-table-head">字段 / 文本（可用变量） / X / Y / 字号 / 字体 / 颜色 / 加粗</div>
+              <div class="wide text-table-head">字段 / 文本（可用变量） / X / Y / 字号 / 字体 / 颜色 / 字重 / 阴影</div>
               <div id="checkin-text-rows" class="wide"></div><button id="add-checkin-text" class="secondary small wide" type="button">新增自定义文字行</button>
             </form>
             <div class="layer-upload-grid single-layer-upload">
@@ -113,7 +113,7 @@
       </section>
 
       <section class="board" id="status-board">
-        <div class="board-title"><div><span>第三板块</span><h2>角色绑定的状态栏模板</h2><p>模板只保留全背景与文字。经验条已移除；同伴或皮肤填写的经验加成、2/3/5 星技能可在文字行中绑定并调位置。</p></div><button id="new-status-template" type="button">新增状态模板</button></div>
+        <div class="board-title"><div><span>第三板块</span><h2>角色绑定的状态栏模板</h2><p>模板只保留一张全背景、可拖定位置的文字和经验条。同伴或装备中的皮肤填写的经验加成、星级和 2/3/5 星技能会自动绑定到对应变量。</p></div><button id="new-status-template" type="button">新增状态模板</button></div>
         <div class="template-layout panel">
           <aside class="template-sidebar">
             <section class="template-side-section">
@@ -128,11 +128,12 @@
           <div class="template-editor">
             <form id="status-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_status" /></label><label>模板名称<input name="name" placeholder="灵儿状态栏" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="msyh_light">微软雅黑细体</option><option value="deng">等线</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="youyuan">幼圆（圆润）</option><option value="xingkai">华文行楷（手写）</option><option value="cute">圆润可爱（可替换）</option><option value="comic">手写卡通（可替换）</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
               <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label>
-              <div class="wide template-help">可用变量：<code>{user_name}</code>、<code>{user_id}</code>、<code>{character_name}</code>、<code>{subtitle_name}</code>、<code>{quality}</code>、<code>{bonus}</code>、<code>{stars}</code>、<code>{level}</code>、<code>{current}</code>、<code>{need}</code>、<code>{skill_2_name}</code>、<code>{skill_2_desc}</code>、<code>{skill_3_name}</code>、<code>{skill_3_desc}</code>、<code>{skill_5_name}</code>、<code>{skill_5_desc}</code>。带“绑定”字样的默认行会读取当前同伴；装备皮肤后优先读取皮肤填写的内容。</div>
-              <div class="wide text-table-head">字段 / 文本（可用变量） / X / Y / 字号 / 字体 / 颜色 / 加粗</div>
-              <div id="status-text-rows" class="wide"></div><button id="add-status-text" class="secondary small wide" type="button">新增自定义文字行</button>
+              <div class="wide template-help">可用变量：<code>{user_name}</code>、<code>{user_id}</code>、<code>{character_name}</code>、<code>{subtitle_name}</code>、<code>{quality}</code>、<code>{bonus}</code>、<code>{stars}</code>、<code>{level}</code>、<code>{current}</code>、<code>{need}</code>、<code>{skill_2_name}</code>、<code>{skill_2_desc}</code>、<code>{skill_3_name}</code>、<code>{skill_3_desc}</code>、<code>{skill_5_name}</code>、<code>{skill_5_desc}</code>。装备皮肤后，经验加成和技能优先读取皮肤填写的内容。</div>
+              <fieldset class="wide progress-controls"><legend>经验条（绑定当前同伴经验）</legend><label class="checkline"><input name="progress_enabled" type="checkbox" checked />显示经验条</label><label>X<input name="progress_x" type="number" min="0" max="1" step="0.01" value="0.441" /></label><label>Y<input name="progress_y" type="number" min="0" max="1" step="0.01" value="0.440" /></label><label>宽度<input name="progress_width" type="number" min="0.02" max="1" step="0.01" value="0.455" /></label><label>高度<input name="progress_height" type="number" min="0.008" max="0.2" step="0.005" value="0.043" /></label><label>底色<input name="progress_background_color" type="color" value="#dbe2ef" /></label><label>填充色<input name="progress_color" type="color" value="#6d9bc6" /></label><label class="checkline"><input name="progress_auto_color" type="checkbox" checked />填充色跟随同伴/皮肤主色</label></fieldset>
+              <div class="wide text-table-head">字段 / 文本（可用变量） / X / Y / 字号 / 字体 / 颜色 / 字重 / 阴影</div>
+              <div id="status-text-rows" class="wide"></div><div class="wide text-add-controls"><button id="add-status-text" class="secondary small" type="button">新增自定义文字行</button><select id="status-preset-text"><option value="">恢复可绑定预设字段…</option><option value="user">打开者</option><option value="name">角色名</option><option value="subtitle">副标题/经验加成</option><option value="stars">星级</option><option value="level">等级经验</option><option value="skill_2_name">2星技能名</option><option value="skill_2_desc">2星技能描述</option><option value="skill_3_name">3星技能名</option><option value="skill_3_desc">3星技能描述</option><option value="skill_5_name">5星技能名</option><option value="skill_5_desc">5星技能描述</option></select><button id="add-status-preset-text" class="secondary small" type="button">添加预设字段</button></div>
             </form>
             <div class="layer-upload-grid single-layer-upload">
               <div id="status-background-dropzone" class="dropzone compact" tabindex="0"><strong>上传全背景</strong><span>图片会覆盖整个状态栏。</span><input id="status-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
