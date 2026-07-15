@@ -15,25 +15,29 @@ const STATUS_TEXTS = {
   subtitle: { label: '副标题', text: '{subtitle_name}  |  {quality}  |  {bonus}', x: 0.441, y: 0.265, size: 0.02, color: '#6d9bc6', bold: true },
   stars: { label: '星级', text: '{stars}', x: 0.441, y: 0.323, size: 0.031, color: '#f5b642', bold: true },
   level: { label: '等级经验', text: 'Lv.{level}  {current}/{need} EXP', x: 0.441, y: 0.39, size: 0.021, color: '#6d9bc6', bold: true },
+  skill_2_name: { label: '2星技能名（绑定）', text: '2星 {skill_2_name}', x: 0.457, y: 0.53, size: 0.02, color: '#ffffff', bold: true },
+  skill_2_desc: { label: '2星技能描述（绑定）', text: '{skill_2_desc}', x: 0.457, y: 0.573, size: 0.018, color: '#6d9bc6', bold: false },
+  skill_3_name: { label: '3星技能名（绑定）', text: '3星 {skill_3_name}', x: 0.457, y: 0.606, size: 0.02, color: '#ffffff', bold: true },
+  skill_3_desc: { label: '3星技能描述（绑定）', text: '{skill_3_desc}', x: 0.457, y: 0.649, size: 0.018, color: '#6d9bc6', bold: false },
+  skill_5_name: { label: '5星技能名（绑定）', text: '5星 {skill_5_name}', x: 0.457, y: 0.682, size: 0.02, color: '#ffffff', bold: true },
+  skill_5_desc: { label: '5星技能描述（绑定）', text: '{skill_5_desc}', x: 0.457, y: 0.725, size: 0.018, color: '#6d9bc6', bold: false },
 };
-
 const FONT_OPTIONS = [
-  ['default', '默认中文字体（Noto）'], ['msyh', '微软雅黑'], ['simhei', '黑体'], ['simsun', '宋体'], ['kaiti', '楷体'],
-  ['fangsong', '仿宋'], ['dengxian', '等线'], ['lisu', '隶书'], ['youyuan', '幼圆'], ['stxingkai', '华文行楷'],
-  ['stfangsong', '华文仿宋'], ['stsong', '华文宋体'], ['stxihei', '华文细黑'],
-  ['zcool_kuaile', '站酷快乐体（可爱）'], ['mashanzheng', '马善政毛笔（手写）'], ['zcool_qingke', '站酷庆科黄油体（圆润）'],
-  ['longcang', '龙藏体（飘逸）'], ['liujianmaocao', '刘建毛草（签名字）'],
+  ['inherit', '跟随模板字体'],
+  ['default', '默认中文字体'],
+  ['msyh', '微软雅黑'],
+  ['simhei', '黑体'],
+  ['simsun', '宋体'],
+  ['kaiti', '楷体'],
 ];
-const FONT_OPTIONS_HTML = FONT_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
-const TEXT_STYLE_DEFAULTS = {
-  font_family: '', font_weight: 400, shadow_color: '#1c2a40', shadow_offset_x: 0, shadow_offset_y: 2, shadow_blur: 2.5, shadow_opacity: 64,
-};
 
 let characters = [];
 let players = [];
 let settings = {};
 let checkinTemplates = [];
 let statusTemplates = [];
+let checkinAssets = [];
+let statusAssets = [];
 let selectedId = '';
 let selectedCheckinId = '';
 let selectedStatusId = '';
@@ -143,6 +147,8 @@ async function loadAll() {
   settings = payload.settings || settings;
   checkinTemplates = payload.checkin_templates || [];
   statusTemplates = payload.status_templates || [];
+  checkinAssets = payload.checkin_assets || [];
+  statusAssets = payload.status_assets || [];
   if (!selectedId && characters[0]) selectedId = characters[0].id;
   if (!selectedCheckinId && checkinTemplates[0]) selectedCheckinId = checkinTemplates[0].id;
   if (!selectedStatusId && statusTemplates[0]) selectedStatusId = statusTemplates[0].id;
@@ -150,6 +156,7 @@ async function loadAll() {
   fillCharacter(characters.find((entry) => entry.id === selectedId) || characters[0]);
   renderTemplateList('checkin'); fillTemplate('checkin', checkinTemplates.find((entry) => entry.id === selectedCheckinId) || checkinTemplates[0]);
   renderTemplateList('status'); fillTemplate('status', statusTemplates.find((entry) => entry.id === selectedStatusId) || statusTemplates[0]);
+  renderTemplateAssetList('checkin'); renderTemplateAssetList('status');
 }
 
 function renderColorGroup() {
@@ -174,8 +181,6 @@ function renderList() {
     item.className = `character-item ${entry.id === selectedId ? 'active' : ''} ${entry.kind === 'skin' ? 'skin-entry' : ''}`;
     const description = entry.kind === 'experience_ball'
       ? `${entry.exp_amount || 0} EXP · 权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
-      : entry.kind === 'item'
-        ? `道具 · 权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
       : `${entry.english_name || entry.quality || entry.star || '—'} ${entry.in_pool ? '· 奖池' : ''}`;
     item.innerHTML = `<img src="${entry.preview || assetUrl(entry.image)}" alt="" /><span><strong>${escapeHtml(entry.kind === 'skin' ? `↳ ${entry.name}` : entry.name)}</strong><span>${escapeHtml(description)}</span></span>`;
     item.addEventListener('click', () => { selectedId = entry.id; renderList(); fillCharacter(entry); });
@@ -225,13 +230,12 @@ function renderAssetOptions() {
 
 function toggleKindFields(kind) {
   $$('.companion-only').forEach((element) => element.classList.toggle('hidden', kind !== 'companion'));
+  $$('.profile-only').forEach((element) => element.classList.toggle('hidden', !['companion', 'skin'].includes(kind)));
   $$('.skin-only').forEach((element) => element.classList.toggle('hidden', kind !== 'skin'));
   $$('.item-only').forEach((element) => element.classList.toggle('hidden', kind !== 'item'));
   $$('.experience-only').forEach((element) => element.classList.toggle('hidden', kind !== 'experience_ball'));
-  $$('.weighted-only').forEach((element) => element.classList.toggle('hidden', !['item', 'experience_ball'].includes(kind)));
-  $$('.quality-field').forEach((element) => element.classList.toggle('hidden', kind === 'item'));
   const form = $('#character-form');
-  form.elements.quality.placeholder = kind === 'experience_ball' ? '经验球' : 'SSR / SR / R';
+  form.elements.quality.placeholder = kind === 'item' ? '普通 / 中级 / 高级' : (kind === 'experience_ball' ? '经验球' : 'SSR / SR / R');
 }
 function fillCharacter(entry) {
   const form = $('#character-form');
@@ -245,11 +249,7 @@ function fillCharacter(entry) {
   $('#parent-companion').value = entry.parent_id || '';
   toggleKindFields(entry.kind || 'companion');
   $('#preview-image').src = entry.preview || assetUrl(entry.image); $('#preview-title').textContent = entry.name || '未命名条目';
-  $('#preview-subtitle').textContent = entry.kind === 'experience_ball'
-    ? `抽中后直接 +${entry.exp_amount || 0} EXP，权重 ${entry.draw_weight || 1}`
-    : entry.kind === 'item'
-      ? `道具 · 抽取权重 ${entry.draw_weight || 1}`
-      : `${kindLabel(entry.kind)} · ${entry.english_name || entry.quality || '—'}`;
+  $('#preview-subtitle').textContent = entry.kind === 'experience_ball' ? `抽中后直接 +${entry.exp_amount || 0} EXP，权重 ${entry.draw_weight || 1}` : `${kindLabel(entry.kind)} · ${entry.english_name || entry.quality || '—'}`;
 }
 function readCharacter() {
   const form = $('#character-form'); const kind = form.elements.kind.value;
@@ -297,46 +297,45 @@ async function uploadEntryFile(file) {
 function templateDefaults(type) {
   const texts = type === 'checkin' ? CHECKIN_TEXTS : STATUS_TEXTS;
   return {
-    id: '', name: '', bound_entry_id: '', priority: 0, background_image: '', panel_image: '', portrait_frame_image: '', image: '', enabled: true, show_companion: true, text_style_version: 2,
-    portrait_scale: 1, portrait_offset_x: 0, portrait_offset_y: 0, font_family: 'default', panel_color: type === 'checkin' ? '#152238' : '#ffffff', message: type === 'checkin' ? '今日也要和同伴一起前进。' : '',
+    id: '', name: '', bound_entry_id: '', priority: 0, background_image: '', image: '', enabled: true, font_family: 'default',
+    ...(type === 'checkin' ? { messages: ['今日也要和同伴一起前进。', '线索会回应认真观察的人。', '和同伴一起，继续推进故事。', '今天的选择，也会留下新的线索。', '下一次相遇，或许就在转角。'] } : {}),
     texts: Object.fromEntries(Object.entries(texts).map(([key, value]) => [key, { ...value }])),
   };
 }
 function textRow(container, key, config, label = '') {
   const row = document.createElement('div'); row.className = 'text-row'; row.dataset.textKey = key;
-  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" aria-label="文字内容" /><input data-field="x" aria-label="X 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="y" aria-label="Y 坐标" type="number" min="0" max="1" step="0.01" /><input data-field="size" aria-label="字号" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family" aria-label="字体"><option value="">继承模板字体</option>${FONT_OPTIONS_HTML}</select><select data-field="font_weight" aria-label="字重"><option value="100">极细 100</option><option value="200">纤细 200</option><option value="300">细体 300</option><option value="400">常规 400</option><option value="500">中等 500</option><option value="600">半粗 600</option><option value="700">粗体 700</option><option value="800">特粗 800</option><option value="900">黑体 900</option></select><input data-field="color" aria-label="文字颜色" type="color" /><details class="shadow-control"><summary>柔和阴影</summary><label>颜色<input data-field="shadow_color" aria-label="阴影颜色" type="color" /></label><label>X<input data-field="shadow_offset_x" aria-label="阴影 X 偏移" type="number" min="-40" max="40" step="1" /></label><label>Y<input data-field="shadow_offset_y" aria-label="阴影 Y 偏移" type="number" min="-40" max="40" step="1" /></label><label>模糊<input data-field="shadow_blur" aria-label="阴影模糊" type="number" min="0" max="12" step="0.5" /></label><label>不透明度<input data-field="shadow_opacity" aria-label="阴影不透明度" type="number" min="0" max="255" step="1" /></label></details><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
+  const selectedFont = FONT_OPTIONS.some(([value]) => value === config.font_family) ? config.font_family : 'inherit';
+  const fontOptions = FONT_OPTIONS.map(([value, text]) => `<option value="${value}"${value === selectedFont ? ' selected' : ''}>${text}</option>`).join('');
+  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" /><input data-field="x" type="number" min="0" max="1" step="0.01" /><input data-field="y" type="number" min="0" max="1" step="0.01" /><input data-field="size" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family">${fontOptions}</select><input data-field="color" type="color" /><label class="bold-control"><input data-field="bold" type="checkbox" /><span>加粗</span></label><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
   row.querySelector('[data-field="text"]').value = config.text || '';
   row.querySelector('[data-field="x"]').value = config.x ?? 0;
   row.querySelector('[data-field="y"]').value = config.y ?? 0;
   row.querySelector('[data-field="size"]').value = config.size ?? 0.03;
   row.querySelector('[data-field="color"]').value = config.color || '#ffffff';
-  row.querySelector('[data-field="font_family"]').value = config.font_family || '';
-  row.querySelector('[data-field="font_weight"]').value = String(config.font_weight ?? (config.bold ? 700 : TEXT_STYLE_DEFAULTS.font_weight));
-  row.querySelector('[data-field="shadow_color"]').value = config.shadow_color || TEXT_STYLE_DEFAULTS.shadow_color;
-  row.querySelector('[data-field="shadow_offset_x"]').value = config.shadow_offset_x ?? TEXT_STYLE_DEFAULTS.shadow_offset_x;
-  row.querySelector('[data-field="shadow_offset_y"]').value = config.shadow_offset_y ?? TEXT_STYLE_DEFAULTS.shadow_offset_y;
-  row.querySelector('[data-field="shadow_blur"]').value = config.shadow_blur ?? TEXT_STYLE_DEFAULTS.shadow_blur;
-  row.querySelector('[data-field="shadow_opacity"]').value = config.shadow_opacity ?? TEXT_STYLE_DEFAULTS.shadow_opacity;
-  row.querySelector('.remove-text').addEventListener('click', () => row.remove());
+  row.querySelector('[data-field="bold"]').checked = Boolean(config.bold);
+  row.querySelector('.remove-text').addEventListener('click', () => {
+    row.remove();
+    // Deletion is part of the live template state.  Refresh the shared
+    // renderer just like edits do, so the operator can confirm immediately
+    // that the line is gone before saving the template.
+    const type = container.id.replace(/-text-rows$/, '');
+    if (type === 'checkin' || type === 'status') schedulePreview(type);
+  });
   container.appendChild(row);
 }
 function buildTextRows(type, values = {}) {
   const defaults = type === 'checkin' ? CHECKIN_TEXTS : STATUS_TEXTS;
   const container = $(`#${type}-text-rows`); container.innerHTML = '';
-  const keys = [...Object.keys(defaults), ...Object.keys(values || {}).filter((key) => !(key in defaults))];
-  keys.forEach((key) => textRow(container, key, { ...TEXT_STYLE_DEFAULTS, ...(defaults[key] || { label: key, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }), ...(values?.[key] || {}) }, defaults[key]?.label || key));
+  const hasSavedRows = values && typeof values === 'object';
+  const keys = hasSavedRows ? Object.keys(values) : Object.keys(defaults);
+  keys.forEach((key) => textRow(container, key, { ...(defaults[key] || { label: key, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }), ...(values?.[key] || {}) }, defaults[key]?.label || key));
 }
 function readTextRows(type) {
   const texts = {};
   $$(`#${type}-text-rows .text-row`).forEach((row) => {
     const key = row.dataset.textKey; if (!key) return;
     const field = (name) => row.querySelector(`[data-field="${name}"]`);
-    const fontWeight = numberValue(field('font_weight').value, 400);
-    texts[key] = {
-      text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), color: field('color').value,
-      font_family: field('font_family').value, font_weight: fontWeight, bold: fontWeight >= 600,
-      shadow_color: field('shadow_color').value, shadow_offset_x: numberValue(field('shadow_offset_x').value, 0), shadow_offset_y: numberValue(field('shadow_offset_y').value, 2), shadow_blur: numberValue(field('shadow_blur').value, 2.5), shadow_opacity: numberValue(field('shadow_opacity').value, 64),
-    };
+    texts[key] = { text: field('text').value.trim(), x: numberValue(field('x').value, 0), y: numberValue(field('y').value, 0), size: numberValue(field('size').value, 0.03), font_family: field('font_family').value, color: field('color').value, bold: field('bold').checked };
   });
   return texts;
 }
@@ -344,32 +343,57 @@ function renderTemplateList(type) {
   const list = type === 'checkin' ? checkinTemplates : statusTemplates;
   const selected = type === 'checkin' ? selectedCheckinId : selectedStatusId;
   const element = $(`#${type}-template-list`); element.innerHTML = '';
+  const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = '背景文件 / 模板（可滚动）'; element.appendChild(heading);
   list.forEach((template) => {
     const item = document.createElement('button'); item.type = 'button'; item.className = `character-item ${template.id === selected ? 'active' : ''}`;
     const binding = template.bound_entry_id ? (characters.find((entry) => entry.id === template.bound_entry_id)?.name || '已删除绑定') : '通用';
-    item.innerHTML = `<img src="${template.preview || assetUrl(template.background_image || template.image, type === 'checkin' ? 'checkin-assets' : 'status-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}</span></span>`;
+    const filename = template.background_image || template.image || '尚未上传背景';
+    item.innerHTML = `<img src="${template.preview || assetUrl(filename, type === 'checkin' ? 'checkin-assets' : 'status-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}<br />背景：${escapeHtml(filename)}</span></span>`;
     item.addEventListener('click', () => { if (type === 'checkin') selectedCheckinId = template.id; else selectedStatusId = template.id; renderTemplateList(type); fillTemplate(type, template); });
     element.appendChild(item);
   });
   if (!element.childElementCount) element.innerHTML = '<p class="empty">暂无模板。</p>';
 }
+function renderTemplateAssetList(type) {
+  const assets = type === 'checkin' ? checkinAssets : statusAssets;
+  const element = $(`#${type}-asset-list`); const form = $(`#${type}-template-form`);
+  const selectedFile = form.elements.background_image.value.trim(); element.innerHTML = '';
+  if (!assets.length) {
+    element.innerHTML = '<p class="empty">暂无背景文件。上传背景后会显示在这里。</p>';
+    return;
+  }
+  assets.forEach((asset) => {
+    const filename = String(asset.filename || ''); if (!filename) return;
+    const item = document.createElement('button'); item.type = 'button';
+    item.className = `asset-file-item ${filename === selectedFile ? 'active' : ''}`;
+    const image = document.createElement('img'); image.src = asset.preview || ''; image.alt = '';
+    const copy = document.createElement('span'); const name = document.createElement('strong'); const hint = document.createElement('span');
+    name.textContent = filename; hint.textContent = filename === selectedFile ? '当前背景' : '点击设为当前背景'; copy.append(name, hint); item.append(image, copy);
+    item.addEventListener('click', () => {
+      form.elements.background_image.value = filename;
+      $(`#${type}-preview`).src = asset.preview || '';
+      renderTemplateAssetList(type); schedulePreview(type); toast('已选择背景文件，保存模板后生效。');
+    });
+    element.appendChild(item);
+  });
+}
 function fillTemplate(type, template) {
   const form = $(`#${type}-template-form`); const data = template || templateDefaults(type);
   setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setValue(form, 'font_family', data.font_family || 'default');
-  setValue(form, 'background_image', data.background_image || data.image || ''); setValue(form, 'panel_image', data.panel_image || ''); setValue(form, 'portrait_frame_image', data.portrait_frame_image || ''); setValue(form, 'panel_color', data.panel_color || (type === 'checkin' ? '#152238' : '#ffffff'));
-  setChecked(form, 'enabled', data.enabled !== false); setChecked(form, 'show_companion', data.show_companion !== false); setValue(form, 'portrait_scale', data.portrait_scale ?? 1); setValue(form, 'portrait_offset_x', data.portrait_offset_x ?? 0); setValue(form, 'portrait_offset_y', data.portrait_offset_y ?? 0);
-  if (form.elements.message) setValue(form, 'message', data.message || '');
-  buildTextRows(type, data.texts || {});
+  setValue(form, 'background_image', data.background_image || data.image || '');
+  setChecked(form, 'enabled', data.enabled !== false);
+  if (form.elements.messages) setValue(form, 'messages', (data.messages || []).join('\n'));
+  buildTextRows(type, data.texts);
   const preview = $(`#${type}-preview`); const assetType = type === 'checkin' ? 'checkin-assets' : 'status-assets'; preview.src = data.preview || assetUrl(data.background_image || data.image, assetType);
+  renderTemplateAssetList(type);
   schedulePreview(type);
 }
 function readTemplate(type) {
   const form = $(`#${type}-template-form`);
   return {
-    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), font_family: form.elements.font_family.value, text_style_version: 2,
-    background_image: form.elements.background_image.value.trim(), panel_image: form.elements.panel_image.value.trim(), portrait_frame_image: form.elements.portrait_frame_image.value.trim(), panel_color: form.elements.panel_color.value,
-    enabled: form.elements.enabled.checked, show_companion: form.elements.show_companion.checked, portrait_scale: numberValue(form.elements.portrait_scale.value, 1), portrait_offset_x: numberValue(form.elements.portrait_offset_x.value, 0), portrait_offset_y: numberValue(form.elements.portrait_offset_y.value, 0),
-    ...(type === 'checkin' ? { message: form.elements.message.value.trim() } : {}), texts: readTextRows(type),
+    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), font_family: form.elements.font_family.value,
+    background_image: form.elements.background_image.value.trim(), enabled: form.elements.enabled.checked,
+    ...(type === 'checkin' ? { messages: form.elements.messages.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).slice(0, 5) } : {}), texts: readTextRows(type),
   };
 }
 function schedulePreview(type) {
@@ -389,6 +413,9 @@ async function uploadTemplateLayer(type, field, file) {
   const result = normalizeResponse(await upload(type === 'checkin' ? '/upload-checkin-image' : '/upload-status-image', file));
   if (!result.image) throw new Error('模板图片上传失败。');
   $(`#${type}-template-form`).elements[field].value = result.image;
+  const assets = type === 'checkin' ? checkinAssets : statusAssets;
+  if (!assets.some((asset) => asset.filename === result.image)) assets.unshift({ filename: result.image, preview: URL.createObjectURL(file) });
+  renderTemplateAssetList(type);
   await updateTemplatePreview(type, true); toast('模板图片已上传。');
 }
 function addCustomText(type) {
@@ -397,7 +424,7 @@ function addCustomText(type) {
   const safe = key.trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
   if (!safe) { toast('字段 ID 无效。'); return; }
   if ($(`#${type}-text-rows .text-row[data-text-key="${safe}"]`)) { toast('该文字行已存在。'); return; }
-  textRow($(`#${type}-text-rows`), safe, { ...TEXT_STYLE_DEFAULTS, label: safe, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }, safe);
+  textRow($(`#${type}-text-rows`), safe, { label: safe, text: '', x: 0.08, y: 0.72, size: 0.03, color: '#ffffff', bold: false }, safe);
   schedulePreview(type);
 }
 
@@ -461,10 +488,7 @@ function bindEvents() {
       await apiDelete(`/${type}-templates/${id}`); if (type === 'checkin') selectedCheckinId = ''; else selectedStatusId = ''; toast('已删除模板。'); await loadAll();
     }));
     $(`#add-${type}-text`).addEventListener('click', () => addCustomText(type));
-    ['background_image', 'panel_image', 'portrait_frame_image'].forEach((field, index) => {
-      const suffix = ['background', 'panel', 'frame'][index];
-      bindImageDropzone(`#${type}-${suffix}-dropzone`, `#${type}-${suffix}-upload`, (file) => uploadTemplateLayer(type, field, file), `pasted-${type}-${suffix}.png`);
-    });
+    bindImageDropzone(`#${type}-background-dropzone`, `#${type}-background-upload`, (file) => uploadTemplateLayer(type, 'background_image', file), `pasted-${type}-background.png`);
   });
 }
 

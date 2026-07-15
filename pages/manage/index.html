@@ -22,7 +22,6 @@
           <div class="panel-head"><div><h3>色彩控制</h3><p>先选择要调整的图片类型，只显示对应色彩，避免混杂。</p></div><button id="save-settings" type="button">保存当前色彩</button></div>
           <div class="color-tabs" role="tablist">
             <button type="button" class="active" data-color-group="companion">同伴栏</button>
-            <button type="button" data-color-group="status">状态栏</button>
             <button type="button" data-color-group="item">道具栏</button>
           </div>
           <form id="settings-form" class="color-grid">
@@ -31,11 +30,8 @@
             <label data-color-group="companion">同伴边框<input name="companion_border_color" type="color" /></label>
             <label data-color-group="companion">专属物品字体<input name="exclusive_item_color" type="color" /></label>
             <label data-color-group="companion">专属物品边框<input name="exclusive_item_border_color" type="color" /></label>
-            <label data-color-group="status" hidden>状态栏角色名<input name="status_name_color" type="color" /></label>
-            <label data-color-group="status" hidden>状态栏小字与等级<input name="status_meta_color" type="color" /></label>
-            <label data-color-group="status" hidden>状态栏默认面板<input name="status_panel_color" type="color" /></label>
             <label data-color-group="item" hidden>道具名称<input name="item_name_color" type="color" /></label>
-            <label data-color-group="item" hidden>道具标签<input name="item_quality_color" type="color" /></label>
+            <label data-color-group="item" hidden>道具品质<input name="item_quality_color" type="color" /></label>
             <label data-color-group="item" hidden>道具效果<input name="item_effect_color" type="color" /></label>
           </form>
         </div>
@@ -60,7 +56,7 @@
               <label>ID<input name="id" required placeholder="linger" /></label>
               <label>中文名称<input name="name" required placeholder="灵儿 / 星辰经验球" /></label>
               <label>英文名 / 副标题<input name="english_name" placeholder="Blue Predator" /></label>
-              <label class="quality-field">品质<input name="quality" placeholder="SSR / 经验球" /></label>
+              <label>品质<input name="quality" placeholder="SSR / 普通 / 经验球" /></label>
               <label class="skin-only">所属同伴<select name="parent_id" id="parent-companion"></select></label>
               <label class="companion-only wide">专属物品（每行一件）<textarea name="exclusive_items" rows="3" placeholder="灵儿的信物&#10;灵儿的徽章"></textarea></label>
               <label>图片文件<input name="image" placeholder="上传后自动填入" /></label>
@@ -68,14 +64,14 @@
               <label>画面焦点 Y<input name="focal_y" type="number" min="0" max="1" step="0.01" value="0.5" /></label>
               <label class="checkline"><input name="in_pool" type="checkbox" />加入本期奖池</label>
               <label class="companion-only wide">获取途径<input name="route" placeholder="运营后台添加 / 活动" /></label>
-              <label class="companion-only wide">经验加成<input name="bonus" placeholder="推理经验 +10%" /></label>
+              <label class="profile-only wide">经验加成<input name="bonus" placeholder="推理经验 +10%" /></label>
               <label class="item-only wide">道具效果<textarea name="effect" rows="2" placeholder="玩家使用后展示的效果说明"></textarea></label>
               <label class="experience-only">增加经验<input name="exp_amount" type="number" min="1" max="999999" value="10" /></label>
-              <label class="weighted-only hidden">抽取权重<input name="draw_weight" type="number" min="1" max="10000" value="10" /></label>
+              <label class="experience-only">抽取权重<input name="draw_weight" type="number" min="1" max="1000" value="10" /></label>
               <input name="intro" type="hidden" />
-              <label class="companion-only">2星技能名<input name="skill0" /></label><label class="companion-only">2星技能描述<input name="skill0Desc" /></label>
-              <label class="companion-only">3星技能名<input name="skill1" /></label><label class="companion-only">3星技能描述<input name="skill1Desc" /></label>
-              <label class="companion-only">5星技能名<input name="skill2" /></label><label class="companion-only">5星技能描述<input name="skill2Desc" /></label>
+              <label class="profile-only">2星技能名<input name="skill0" /></label><label class="profile-only">2星技能描述<input name="skill0Desc" /></label>
+              <label class="profile-only">3星技能名<input name="skill1" /></label><label class="profile-only">3星技能描述<input name="skill1Desc" /></label>
+              <label class="profile-only">5星技能名<input name="skill2" /></label><label class="profile-only">5星技能描述<input name="skill2Desc" /></label>
             </form>
             <div id="image-dropzone" class="dropzone" tabindex="0"><strong>条目图片上传</strong><span>选择、拖放，或点击后 Ctrl+V 粘贴图片。</span><input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
             <div class="upload-row"><button id="save-button" type="button">保存条目</button><button id="delete-button" class="danger" type="button">删除条目</button></div>
@@ -85,24 +81,30 @@
       </section>
 
       <section class="board" id="checkin-board">
-        <div class="board-title"><div><span>第二板块</span><h2>角色绑定的打卡背景与文字模板</h2><p>优先匹配当前皮肤，其次当前同伴，最后使用通用模板。背景、文字面板与角色框可独立上传。</p></div><button id="new-checkin-template" type="button">新增打卡模板</button></div>
+        <div class="board-title"><div><span>第二板块</span><h2>角色绑定的打卡背景与文字模板</h2><p>优先匹配当前皮肤，其次当前同伴，最后使用通用模板。每个模板只保留一张全背景，画框和排版由背景图完成。</p></div><button id="new-checkin-template" type="button">新增打卡模板</button></div>
         <div class="template-layout panel">
-          <aside id="checkin-template-list" class="character-list template-list"></aside>
+          <aside class="template-sidebar">
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>模板</h3><span>选择后编辑</span></div>
+              <div id="checkin-template-list" class="character-list template-list"></div>
+            </section>
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>背景文件</h3><span>点击即可使用</span></div>
+              <div id="checkin-asset-list" class="asset-file-list"></div>
+            </section>
+          </aside>
           <div class="template-editor">
             <form id="checkin-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_checkin" /></label><label>模板名称<input name="name" placeholder="灵儿打卡" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板字体<select name="font_family"><option value="default">默认中文字体（Noto）</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="fangsong">仿宋</option><option value="dengxian">等线</option><option value="lisu">隶书</option><option value="youyuan">幼圆</option><option value="stxingkai">华文行楷</option><option value="stfangsong">华文仿宋</option><option value="stsong">华文宋体</option><option value="stxihei">华文细黑</option><option value="zcool_kuaile">站酷快乐体（可爱）</option><option value="mashanzheng">马善政毛笔（手写）</option><option value="zcool_qingke">站酷庆科黄油体（圆润）</option><option value="longcang">龙藏体（飘逸）</option><option value="liujianmaocao">刘建毛草（签名字）</option></select></label><label>默认文字面板色<input name="panel_color" type="color" value="#152238" /></label>
-              <label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label><label class="checkline"><input name="show_companion" type="checkbox" checked />显示角色图</label><label>角色缩放<input name="portrait_scale" type="number" min="0.5" max="1.5" step="0.01" value="1" /></label>
-              <label>角色横向偏移<input name="portrait_offset_x" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label><label>角色纵向偏移<input name="portrait_offset_y" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label><label class="wide">打卡附言（{message}）<input name="message" placeholder="今日也要和同伴一起前进。" /></label>
-              <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label><label class="wide">文字面板 / 装饰层<input name="panel_image" placeholder="支持透明 PNG" /></label><label class="wide">角色框 / 透明边框层<input name="portrait_frame_image" placeholder="支持透明 PNG" /></label>
-              <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{message}</code>、<code>{date}</code>、<code>{user_name}</code>、<code>{user_id}</code>。全尺寸透明图会完整叠加；较小图片会自动放到对应区域。</div>
-              <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 字体 / 字重 / 颜色 / 阴影 / 删除</div>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
+              <label class="wide">随机附言（最多 5 条，每次成功打卡随机使用一条）<textarea name="messages" rows="5" placeholder="每行一条随机附言"></textarea></label>
+              <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label>
+              <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{message}</code>、<code>{date}</code>、<code>{user_name}</code>、<code>{user_id}</code>。<code>{message}</code> 的位置由下方文字行控制。</div>
+              <div class="wide text-table-head">字段 / 文本（可用变量） / X / Y / 字号 / 字体 / 颜色 / 加粗</div>
               <div id="checkin-text-rows" class="wide"></div><button id="add-checkin-text" class="secondary small wide" type="button">新增自定义文字行</button>
             </form>
-            <div class="layer-upload-grid">
+            <div class="layer-upload-grid single-layer-upload">
               <div id="checkin-background-dropzone" class="dropzone compact" tabindex="0"><strong>上传全背景</strong><span>16:9 图片会无缝覆盖整张打卡卡片。</span><input id="checkin-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
-              <div id="checkin-panel-dropzone" class="dropzone compact" tabindex="0"><strong>上传文字面板层</strong><span>可使用透明 PNG 装饰文字区域。</span><input id="checkin-panel-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
-              <div id="checkin-frame-dropzone" class="dropzone compact" tabindex="0"><strong>上传角色框层</strong><span>可使用透明 PNG 边框。</span><input id="checkin-frame-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
             </div>
             <div class="upload-row"><button id="preview-checkin-template" class="secondary" type="button">生成效果预览</button><button id="save-checkin-template" type="button">保存模板</button><button id="delete-checkin-template" class="danger" type="button">删除模板</button></div>
             <img id="checkin-preview" class="template-preview" alt="打卡成品预览" />
@@ -111,24 +113,29 @@
       </section>
 
       <section class="board" id="status-board">
-        <div class="board-title"><div><span>第三板块</span><h2>角色绑定的状态栏模板</h2><p>保持原有左角色、右信息的状态栏排版；三层图片、角色绑定、字体和打开者信息都可单独配置。</p></div><button id="new-status-template" type="button">新增状态模板</button></div>
+        <div class="board-title"><div><span>第三板块</span><h2>角色绑定的状态栏模板</h2><p>模板只保留全背景与文字。经验条已移除；同伴或皮肤填写的经验加成、2/3/5 星技能可在文字行中绑定并调位置。</p></div><button id="new-status-template" type="button">新增状态模板</button></div>
         <div class="template-layout panel">
-          <aside id="status-template-list" class="character-list template-list"></aside>
+          <aside class="template-sidebar">
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>模板</h3><span>选择后编辑</span></div>
+              <div id="status-template-list" class="character-list template-list"></div>
+            </section>
+            <section class="template-side-section">
+              <div class="template-side-head"><h3>背景文件</h3><span>点击即可使用</span></div>
+              <div id="status-asset-list" class="asset-file-list"></div>
+            </section>
+          </aside>
           <div class="template-editor">
             <form id="status-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_status" /></label><label>模板名称<input name="name" placeholder="灵儿状态栏" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板字体<select name="font_family"><option value="default">默认中文字体（Noto）</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="fangsong">仿宋</option><option value="dengxian">等线</option><option value="lisu">隶书</option><option value="youyuan">幼圆</option><option value="stxingkai">华文行楷</option><option value="stfangsong">华文仿宋</option><option value="stsong">华文宋体</option><option value="stxihei">华文细黑</option><option value="zcool_kuaile">站酷快乐体（可爱）</option><option value="mashanzheng">马善政毛笔（手写）</option><option value="zcool_qingke">站酷庆科黄油体（圆润）</option><option value="longcang">龙藏体（飘逸）</option><option value="liujianmaocao">刘建毛草（签名字）</option></select></label><label>默认信息面板色<input name="panel_color" type="color" value="#ffffff" /></label>
-              <label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label><label class="checkline"><input name="show_companion" type="checkbox" checked />显示角色图</label><label>角色缩放<input name="portrait_scale" type="number" min="0.5" max="1.5" step="0.01" value="1" /></label>
-              <label>角色横向偏移<input name="portrait_offset_x" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label><label>角色纵向偏移<input name="portrait_offset_y" type="number" min="-0.35" max="0.35" step="0.01" value="0" /></label>
-              <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label><label class="wide">右侧信息面板 / 装饰层<input name="panel_image" placeholder="支持透明 PNG" /></label><label class="wide">左侧角色框 / 透明边框层<input name="portrait_frame_image" placeholder="支持透明 PNG" /></label>
-              <div class="wide template-help">可用变量：<code>{user_name}</code>、<code>{user_id}</code>、<code>{character_name}</code>、<code>{subtitle_name}</code>、<code>{quality}</code>、<code>{bonus}</code>、<code>{stars}</code>、<code>{level}</code>、<code>{current}</code>、<code>{need}</code>。</div>
-              <div class="wide text-table-head">字段 / 文本 / X / Y / 字号 / 字体 / 字重 / 颜色 / 阴影 / 删除</div>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
+              <label class="wide">全背景图片<input name="background_image" placeholder="上传后自动填入" /></label>
+              <div class="wide template-help">可用变量：<code>{user_name}</code>、<code>{user_id}</code>、<code>{character_name}</code>、<code>{subtitle_name}</code>、<code>{quality}</code>、<code>{bonus}</code>、<code>{stars}</code>、<code>{level}</code>、<code>{current}</code>、<code>{need}</code>、<code>{skill_2_name}</code>、<code>{skill_2_desc}</code>、<code>{skill_3_name}</code>、<code>{skill_3_desc}</code>、<code>{skill_5_name}</code>、<code>{skill_5_desc}</code>。带“绑定”字样的默认行会读取当前同伴；装备皮肤后优先读取皮肤填写的内容。</div>
+              <div class="wide text-table-head">字段 / 文本（可用变量） / X / Y / 字号 / 字体 / 颜色 / 加粗</div>
               <div id="status-text-rows" class="wide"></div><button id="add-status-text" class="secondary small wide" type="button">新增自定义文字行</button>
             </form>
-            <div class="layer-upload-grid">
+            <div class="layer-upload-grid single-layer-upload">
               <div id="status-background-dropzone" class="dropzone compact" tabindex="0"><strong>上传全背景</strong><span>图片会覆盖整个状态栏。</span><input id="status-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
-              <div id="status-panel-dropzone" class="dropzone compact" tabindex="0"><strong>上传信息面板层</strong><span>可使用透明 PNG 装饰右侧信息区。</span><input id="status-panel-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
-              <div id="status-frame-dropzone" class="dropzone compact" tabindex="0"><strong>上传角色框层</strong><span>可使用透明 PNG 装饰左侧角色区。</span><input id="status-frame-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
             </div>
             <div class="upload-row"><button id="preview-status-template" class="secondary" type="button">生成效果预览</button><button id="save-status-template" type="button">保存模板</button><button id="delete-status-template" class="danger" type="button">删除模板</button></div>
             <img id="status-preview" class="template-preview status-preview" alt="状态栏成品预览" />
