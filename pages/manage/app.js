@@ -52,6 +52,7 @@ let selectedFilter = 'all';
 let activeImagePasteHandler = null;
 let checkinPreviewTimer = 0;
 let statusPreviewTimer = 0;
+const templatePreviewVersion = { checkin: 0, status: 0 };
 
 const bridge = () => window.AstrBotPluginPage || {};
 const endpoint = (path) => String(path || '').trim().replace(/^\/+/, '');
@@ -362,7 +363,7 @@ function renderTemplateList(type) {
   const list = type === 'checkin' ? checkinTemplates : statusTemplates;
   const selected = type === 'checkin' ? selectedCheckinId : selectedStatusId;
   const element = $(`#${type}-template-list`); element.innerHTML = '';
-  const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = '背景文件 / 模板（可滚动）'; element.appendChild(heading);
+  const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = '模板（可滚动）'; element.appendChild(heading);
   list.forEach((template) => {
     const item = document.createElement('button'); item.type = 'button'; item.className = `character-item ${template.id === selected ? 'active' : ''}`;
     const binding = template.bound_entry_id ? (characters.find((entry) => entry.id === template.bound_entry_id)?.name || '已删除绑定') : '通用';
@@ -376,6 +377,9 @@ function renderTemplateList(type) {
 function renderTemplateAssetList(type) {
   const assets = type === 'checkin' ? checkinAssets : statusAssets;
   const element = $(`#${type}-asset-list`); const form = $(`#${type}-template-form`);
+  // Background selection is now direct from the upload area.  Keep this
+  // helper harmless for old embedded pages that still include a file list.
+  if (!element || !form) return;
   const selectedFile = form.elements.background_image.value.trim(); element.innerHTML = '';
   if (!assets.length) {
     element.innerHTML = '<p class="empty">暂无背景文件。上传背景后会显示在这里。</p>';
@@ -407,6 +411,9 @@ function fillTemplate(type, template) {
     setValue(form, 'progress_width', progress.width); setValue(form, 'progress_height', progress.height);
     setValue(form, 'progress_background_color', progress.background_color); setValue(form, 'progress_color', progress.color || '#6d9bc6');
     setChecked(form, 'progress_auto_color', !progress.color);
+    [['progress_x', progress.x], ['progress_y', progress.y], ['progress_width', progress.width], ['progress_height', progress.height]].forEach(([name, value]) => {
+      const slider = $(`[data-progress-for="${name}"]`); if (slider) slider.value = value;
+    });
   }
   if (form.elements.messages) setValue(form, 'messages', (data.messages || []).join('\n'));
   buildTextRows(type, data.texts);
@@ -427,12 +434,17 @@ function readTemplate(type) {
 function schedulePreview(type) {
   const timer = type === 'checkin' ? checkinPreviewTimer : statusPreviewTimer;
   window.clearTimeout(timer);
-  const id = window.setTimeout(() => safely(() => updateTemplatePreview(type, true)), 450);
+  const version = ++templatePreviewVersion[type];
+  const id = window.setTimeout(() => safely(() => updateTemplatePreview(type, true, version)), 450);
   if (type === 'checkin') checkinPreviewTimer = id; else statusPreviewTimer = id;
 }
-async function updateTemplatePreview(type, quiet = false) {
+async function updateTemplatePreview(type, quiet = false, version = null) {
+  const requestVersion = version ?? ++templatePreviewVersion[type];
   const result = normalizeResponse(await apiPost(`/${type}-templates/preview`, readTemplate(type)));
   if (!result.preview) throw new Error('后台没有返回预览图片。');
+  // A slower response from an earlier font/position edit must never overwrite
+  // the current preview.  This was the reason controls looked ineffective.
+  if (requestVersion !== templatePreviewVersion[type]) return;
   $(`#${type}-preview`).src = result.preview;
   if (!quiet) toast(`已生成${type === 'checkin' ? '打卡' : '状态栏'}预览。`);
 }
@@ -463,6 +475,17 @@ function addPresetText(type) {
   schedulePreview(type);
 }
 
+function bindProgressControls(type) {
+  if (type !== 'status') return;
+  const form = $(`#${type}-template-form`);
+  $$(`[data-progress-for]`).forEach((slider) => {
+    const field = form.elements[slider.dataset.progressFor];
+    if (!field) return;
+    slider.addEventListener('input', () => { field.value = slider.value; schedulePreview(type); });
+    field.addEventListener('input', () => { slider.value = field.value; });
+  });
+}
+
 function assetPayload() {
   return { scope_id: $('#asset-scope').value.trim(), user_id: $('#asset-user').value.trim(), name: $('#asset-name').value.trim() };
 }
@@ -478,6 +501,18 @@ function bindEvents() {
     const result = normalizeResponse(await apiPost('/settings', readSettings())); settings = result.settings || settings; toast('视觉色彩已保存。');
   }));
   $('#character-form').elements.kind.addEventListener('change', (event) => toggleKindFields(event.target.value));
+  $('#character-form').elements.in_pool.addEventListener('change', () => safely(async () => {
+    const form = $('#character-form'); const data = readCharacter();
+    if (!data.id || !data.name) {
+      form.elements.in_pool.checked = false;
+      toast('请先填写并保存条目 ID 和名称，再加入奖池。');
+      return;
+    }
+    const result = normalizeResponse(await apiPost('/characters', data));
+    selectedId = result.character?.id || data.id;
+    toast(data.in_pool ? '已加入本期奖池并保存。' : '已从本期奖池移除并保存。');
+    await loadAll();
+  }));
   $('#new-character').addEventListener('click', () => {
     selectedId = ''; const form = $('#character-form'); form.reset(); form.elements.kind.value = 'companion'; form.elements.quality.value = 'SR'; form.elements.focal_x.value = '0.5'; form.elements.focal_y.value = '0.5'; form.elements.exp_amount.value = '10'; form.elements.draw_weight.value = '10';
     toggleKindFields('companion'); $('#preview-image').removeAttribute('src'); $('#preview-title').textContent = '新增条目'; $('#preview-subtitle').textContent = '填写资料后上传图片；可调画面焦点。'; renderList();
@@ -525,6 +560,7 @@ function bindEvents() {
     $(`#add-${type}-text`).addEventListener('click', () => addCustomText(type));
     const presetButton = $(`#add-${type}-preset-text`);
     if (presetButton) presetButton.addEventListener('click', () => addPresetText(type));
+    bindProgressControls(type);
     bindImageDropzone(`#${type}-background-dropzone`, `#${type}-background-upload`, (file) => uploadTemplateLayer(type, 'background_image', file), `pasted-${type}-background.png`);
   });
 }

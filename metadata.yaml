@@ -1,6 +1,6 @@
 name: astrbot_plugin_juben_npc
 display_name: 剧本杀同伴数据库
 desc: 为群聊剧本杀模式提供同伴、皮肤、道具、经验球、角色绑定模板、玩家资产管理、星币、打卡、状态栏与五连抽。
-version: v2.4.0
+version: v2.4.1
 author: Codex
 repo: https://github.com/nmb1337/astrbot_plugin_shujuku-master

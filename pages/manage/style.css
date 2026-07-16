@@ -42,12 +42,12 @@ h3 { font-size: 17px; }
 .color-grid input[type="color"] { min-height: 42px; padding: 3px; }
 
 .character-list { display: grid; gap: 10px; max-height: 720px; overflow: auto; padding: 14px; }
-.template-sidebar { display: grid; gap: 12px; grid-template-rows: minmax(220px, 1fr) minmax(190px, 1fr); min-width: 0; }
+.template-sidebar { min-width: 0; }
 .template-side-section { background: #f8fafc; border: 1px solid #e0e7f0; border-radius: 8px; display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
 .template-side-head { align-items: baseline; border-bottom: 1px solid #e0e7f0; display: flex; gap: 8px; justify-content: space-between; padding: 11px 12px; }
 .template-side-head h3 { font-size: 15px; }
 .template-side-head span { color: #65758c; font-size: 12px; }
-.template-list { max-height: 310px; padding: 10px; }
+.template-list { max-height: 760px; min-height: 620px; padding: 10px; }
 .asset-file-list { display: grid; gap: 8px; max-height: 270px; overflow: auto; padding: 10px; }
 .asset-file-item { align-items: center; background: #fff; border: 1px solid #dfe7f0; border-radius: 7px; color: #182033; display: grid; gap: 8px; grid-template-columns: 76px 1fr; padding: 7px; text-align: left; }
 .asset-file-item:hover { border-color: #94b6e9; }
@@ -98,8 +98,15 @@ textarea { resize: vertical; }
 .progress-controls { border: 1px solid #dce3ec; border-radius: 8px; display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 13px; }
 .progress-controls legend { color: #435775; font-size: 13px; font-weight: 700; padding: 0 5px; }
 .progress-controls .checkline { margin-top: 21px; }
+.progress-field { min-width: 0; }
+.range-control { align-items: center; display: grid; gap: 7px; grid-template-columns: minmax(0, 1fr) 72px; }
+.range-control input[type="range"] { accent-color: #2563eb; min-height: auto; padding: 0; }
+.range-control input[type="number"] { min-width: 0; }
 .text-add-controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 .text-add-controls select { max-width: 260px; min-height: 34px; }
+.skills-details { border: 1px solid #dce3ec; border-radius: 7px; color: #435775; padding: 10px 12px; }
+.skills-details summary { cursor: pointer; font-size: 13px; font-weight: 700; }
+.skills-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
 .layer-upload-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 16px; }
 .single-layer-upload { grid-template-columns: minmax(0, 1fr); }
 .template-preview { aspect-ratio: 16 / 9; background: #edf2f7; border: 1px solid #dce3ec; border-radius: 8px; display: block; margin: 0 16px 16px; max-width: calc(100% - 32px); object-fit: cover; width: 720px; }
@@ -114,8 +121,8 @@ textarea { resize: vertical; }
 
 @media (max-width: 1040px) {
   .library-layout, .template-layout { grid-template-columns: 1fr; }
-  .template-sidebar { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(220px, 1fr); }
-  .template-list, .asset-file-list { max-height: 300px; }
+  .template-sidebar { grid-template-columns: 1fr; }
+  .template-list { max-height: 360px; min-height: 0; }
   .form-grid, .template-form, .asset-grid, .color-grid, .layer-upload-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .progress-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -123,8 +130,9 @@ textarea { resize: vertical; }
   .shell { padding: 14px; }
   .topbar, .board-title, .panel-head { align-items: flex-start; flex-direction: column; }
   .form-grid, .template-form, .asset-grid, .color-grid, .layer-upload-grid { grid-template-columns: 1fr; }
-  .template-sidebar { grid-template-columns: 1fr; grid-template-rows: minmax(200px, 1fr) minmax(180px, 1fr); }
+  .template-sidebar { grid-template-columns: 1fr; }
   .progress-controls { grid-template-columns: 1fr 1fr; }
+  .skills-grid { grid-template-columns: 1fr; }
   .text-table-head { display: none; }
   .text-row { grid-template-columns: 1fr 1fr 1fr; border: 1px solid #e0e7f0; border-radius: 8px; padding: 10px; }
   .text-row strong, .text-row input[data-field="text"] { grid-column: 1 / -1; }

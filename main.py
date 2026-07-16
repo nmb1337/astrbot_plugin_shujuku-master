@@ -1338,6 +1338,12 @@ class JubenNpcPlugin(Star):
         """
         raw_kind = str(data.get("kind") or data.get("type") or COMPANION_KIND).lower()
         kind = raw_kind if raw_kind in {COMPANION_KIND, SKIN_KIND, ITEM_KIND, EXPERIENCE_BALL_KIND} else COMPANION_KIND
+        # Dashboard bridges normally deliver JSON booleans, but some AstrBot
+        # versions serialize checkbox values as strings.  Treat "false" as
+        # false instead of Python's truthy non-empty string so a draw-pool
+        # check reliably survives a save-and-reload round trip.
+        pool_value = data["in_pool"] if "in_pool" in data else data.get("featured", kind == EXPERIENCE_BALL_KIND)
+        in_pool = self._template_bool(pool_value)
         name = str(data.get("name") or data.get("id") or "未命名同伴").strip()
         character_id = self._slug(str(data.get("id") or name))
         quality = str(data.get("quality") or data.get("star") or ("普通" if kind == ITEM_KIND else "R")).strip().upper()
@@ -1376,7 +1382,7 @@ class JubenNpcPlugin(Star):
                 "exp_amount": int(self._template_number(data.get("exp_amount"), 10, 1, 999999)),
                 "draw_weight": int(self._template_number(data.get("draw_weight"), 10, 1, 1000)),
                 "image": image,
-                "in_pool": bool(data.get("in_pool", data.get("featured", True))),
+                "in_pool": in_pool,
                 "focal_x": self._template_number(data.get("focal_x"), 0.5, 0, 1),
                 "focal_y": self._template_number(data.get("focal_y"), 0.5, 0, 1),
                 "colors": [str(colors[0]), str(colors[1]), str(colors[2])],
@@ -1394,7 +1400,7 @@ class JubenNpcPlugin(Star):
                 "draw_weight": int(self._template_number(data.get("draw_weight"), 10, 1, 1000)),
                 "effect": str(data.get("effect") or "暂未填写效果。").strip(),
                 "image": image,
-                "in_pool": bool(data.get("in_pool", data.get("featured", False))),
+                "in_pool": in_pool,
                 "focal_x": self._template_number(data.get("focal_x"), 0.5, 0, 1),
                 "focal_y": self._template_number(data.get("focal_y"), 0.5, 0, 1),
                 "colors": [str(colors[0]), str(colors[1]), str(colors[2])],
@@ -1417,8 +1423,8 @@ class JubenNpcPlugin(Star):
                 "bonus": str(data.get("bonus") or "").strip()[:120],
                 "skills": profile_skills,
                 "image": image,
-                "in_pool": bool(data.get("in_pool", data.get("featured", False))),
-                "featured": bool(data.get("in_pool", data.get("featured", False))),
+                "in_pool": in_pool,
+                "featured": in_pool,
                 "focal_x": self._template_number(data.get("focal_x"), 0.5, 0, 1),
                 "focal_y": self._template_number(data.get("focal_y"), 0.5, 0, 1),
                 "colors": [str(colors[0]), str(colors[1]), str(colors[2])],
@@ -1451,8 +1457,8 @@ class JubenNpcPlugin(Star):
             # saves; the new list is the source of truth and can hold many items.
             "exclusive_item": exclusive_items[0] if exclusive_items else "",
             "exclusive_items": exclusive_items,
-            "in_pool": bool(data.get("in_pool", data.get("featured", False))),
-            "featured": bool(data.get("in_pool", data.get("featured", False))),
+            "in_pool": in_pool,
+            "featured": in_pool,
             "focal_x": self._template_number(data.get("focal_x"), 0.5, 0, 1),
             "focal_y": self._template_number(data.get("focal_y"), 0.5, 0, 1),
         }
@@ -2467,28 +2473,28 @@ class JubenNpcPlugin(Star):
             "msyh": [Path("C:/Windows/Fonts/msyhbd.ttc"), Path("C:/Windows/Fonts/msyh.ttc")],
             "msyh_light": [Path("C:/Windows/Fonts/msyhbd.ttc"), Path("C:/Windows/Fonts/msyhl.ttc"), Path("C:/Windows/Fonts/msyh.ttc")],
             "deng": [Path("C:/Windows/Fonts/Dengb.ttf"), Path("C:/Windows/Fonts/Deng.ttf")],
-            "simhei": [Path("C:/Windows/Fonts/simhei.ttf")],
-            "simsun": [Path("C:/Windows/Fonts/simsun.ttc")],
+            "simhei": [Path("C:/Windows/Fonts/simhei.ttf"), Path("C:/Windows/Fonts/msyhbd.ttc")],
+            "simsun": [Path("C:/Windows/Fonts/simsun.ttc"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
             "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
             "youyuan": [Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/msyhbd.ttc")],
-            "xingkai": [Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/simkai.ttf")],
+            "xingkai": [Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
             # Cute presets prefer Chinese-capable faces first.  Optional
             # operator-supplied files in data/fonts can make the same preset
             # even more decorative without changing code.
-            "cute": [self.font_dir / "CuteRounded-Bold.ttf", self.font_dir / "CuteRounded.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/msyhbd.ttc")],
-            "comic": [self.font_dir / "ComicCute-Bold.ttf", self.font_dir / "ComicCute.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/comicbd.ttf")],
+            "cute": [self.font_dir / "CuteRounded-Bold.ttf", self.font_dir / "CuteRounded.ttf", Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
+            "comic": [self.font_dir / "ComicCute-Bold.ttf", self.font_dir / "ComicCute.ttf", Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf"), Path("C:/Windows/Fonts/comicbd.ttf")],
         }
         family_regular = {
             "msyh": [Path("C:/Windows/Fonts/msyh.ttc"), Path("C:/Windows/Fonts/msyhbd.ttc")],
             "msyh_light": [Path("C:/Windows/Fonts/msyhl.ttc"), Path("C:/Windows/Fonts/msyh.ttc")],
             "deng": [Path("C:/Windows/Fonts/Deng.ttf"), Path("C:/Windows/Fonts/Dengb.ttf")],
-            "simhei": [Path("C:/Windows/Fonts/simhei.ttf")],
-            "simsun": [Path("C:/Windows/Fonts/simsun.ttc")],
+            "simhei": [Path("C:/Windows/Fonts/simhei.ttf"), Path("C:/Windows/Fonts/msyhbd.ttc")],
+            "simsun": [Path("C:/Windows/Fonts/simsun.ttc"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
             "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
-            "youyuan": [Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/msyh.ttc")],
-            "xingkai": [Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/simkai.ttf")],
-            "cute": [self.font_dir / "CuteRounded.ttf", self.font_dir / "CuteRounded-Bold.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/msyh.ttc")],
-            "comic": [self.font_dir / "ComicCute.ttf", self.font_dir / "ComicCute-Bold.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/comic.ttf")],
+            "youyuan": [Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/msyh.ttc")],
+            "xingkai": [Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
+            "cute": [self.font_dir / "CuteRounded.ttf", self.font_dir / "CuteRounded-Bold.ttf", Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
+            "comic": [self.font_dir / "ComicCute.ttf", self.font_dir / "ComicCute-Bold.ttf", Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf"), Path("C:/Windows/Fonts/comic.ttf")],
         }
         system_bold = [
             Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
@@ -2717,6 +2723,17 @@ class JubenNpcPlugin(Star):
     def _template_color(value: Any, fallback: str) -> str:
         value = str(value or fallback)
         return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else fallback
+
+    @classmethod
+    def _soften_color(cls, color: Any, fallback: str, amount: float = 0.2) -> str:
+        """Blend an operator colour into a quiet neutral for unowned labels."""
+        color = cls._template_color(color, fallback)
+        fallback = cls._template_color(fallback, "#9aa4b3")
+        amount = max(0.0, min(1.0, amount))
+        source = tuple(int(color[index:index + 2], 16) for index in (1, 3, 5))
+        base = tuple(int(fallback[index:index + 2], 16) for index in (1, 3, 5))
+        mixed = tuple(round(value * amount + neutral * (1 - amount)) for value, neutral in zip(source, base))
+        return "#" + "".join(f"{value:02x}" for value in mixed)
 
     def _draw_template_texts(
         self,
@@ -2995,7 +3012,10 @@ class JubenNpcPlugin(Star):
         def companion_row_height(exclusive_items: List[str]) -> int:
             # Exclusive items are deliberately three-across as requested.
             rows = (len(exclusive_items) + 2) // 3
-            return 124 + max(0, rows - 1) * 29
+            # The item chips start at +102 and are 25px tall.  Keep their
+            # bottom safely inside the card so a transparent alpha edge cannot
+            # spill into the following skin card in QQ image viewers.
+            return 134 + max(0, rows - 1) * 29
 
         height = max(
             860,
@@ -3047,11 +3067,16 @@ class JubenNpcPlugin(Star):
             for item_index, exclusive_name in enumerate(exclusive_items):
                 column, item_row = item_index % 3, item_index // 3
                 item_x = 264 + column * 302
-                item_y = y + 103 + item_row * 29
+                item_y = y + 102 + item_row * 29
                 exclusive_owned = self._has_exclusive_item(player, companion["id"], exclusive_name)
-                item_color = exclusive_color if exclusive_owned else "#9aa4b3"
-                item_border = exclusive_border if exclusive_owned else "#c5ccd6"
-                draw.rounded_rectangle((item_x, item_y, item_x + 282, item_y + 24), radius=8, outline=item_border, width=1, fill=(255, 255, 255, 35))
+                # Keep this secondary information deliberately quiet.  In
+                # particular, old settings may contain pure black; using it
+                # directly made the compact chips visually much heavier than
+                # the original companion shelf.
+                item_color = self._soften_color(exclusive_color, "#91a0b2", 0.25 if exclusive_owned else 0.16)
+                item_border = self._soften_color(exclusive_border, "#d8e0ea", 0.46 if exclusive_owned else 0.30)
+                item_fill = "#fffaf1" if exclusive_owned else "#f7f9fc"
+                draw.rounded_rectangle((item_x, item_y, item_x + 282, item_y + 24), radius=8, outline=item_border, width=1, fill=item_fill)
                 label = f"专属物品：{exclusive_name}"
                 draw.text((item_x + 10, item_y + 2), label[:16], font=self._font(14, True), fill=item_color)
             if companion["id"] == player.get("current_npc"):

@@ -308,6 +308,20 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertEqual(captured["weights"], [1, 9])
         self.assertEqual(result, {"id": "rare", "label": "道具"})
 
+    def test_pool_checkbox_strings_survive_character_normalization(self):
+        instance = plugin_instance()
+        enabled = instance._normalize_character({
+            "id": "enabled_item", "kind": "item", "name": "可抽道具", "in_pool": "true",
+        })
+        disabled = instance._normalize_character({
+            "id": "disabled_item", "kind": "item", "name": "未抽道具", "in_pool": "false",
+        })
+
+        self.assertTrue(enabled["in_pool"])
+        self.assertFalse(disabled["in_pool"])
+        instance.characters = [enabled]
+        self.assertEqual(instance._draw_pool(PLUGIN.ITEM_KIND), [enabled])
+
     def test_inventory_can_keep_six_companion_groups_on_one_page(self):
         instance = plugin_instance()
         companions = [
@@ -336,9 +350,13 @@ class TemplateManagementTests(unittest.TestCase):
             path = instance._render_inventory(player, page=1)
             with Image.open(path) as image:
                 size = image.size
+                chip_fill = image.getpixel((530, 264))[:3]
+                below_chip = image.getpixel((530, 286))[:3]
 
         self.assertTrue(path.name.endswith("_1.png"))
         self.assertGreaterEqual(size[1], 900)
+        self.assertEqual(chip_fill, (247, 249, 252))
+        self.assertNotEqual(below_chip, chip_fill)
 
 
 if __name__ == "__main__":
