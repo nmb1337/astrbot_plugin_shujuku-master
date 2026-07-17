@@ -68,6 +68,8 @@
               <label class="item-only wide">道具效果<textarea name="effect" rows="2" placeholder="玩家使用后展示的效果说明"></textarea></label>
               <label class="experience-only">增加经验<input name="exp_amount" type="number" min="1" max="999999" value="10" /></label>
               <label class="draw-weight">抽取权重<input name="draw_weight" type="number" min="1" max="1000" value="10" /></label>
+              <label class="item-only checkline"><input name="mining_pool" type="checkbox" />加入挖矿池</label>
+              <label class="item-only">挖矿权重<input name="mining_weight" type="number" min="1" max="1000" value="10" /></label>
               <input name="intro" type="hidden" />
               <details class="profile-only wide skills-details"><summary>星级技能资料（2 / 3 / 5 星）</summary><div class="skills-grid"><label>2星技能名<input name="skill0" /></label><label>2星技能描述<input name="skill0Desc" /></label><label>3星技能名<input name="skill1" /></label><label>3星技能描述<input name="skill1Desc" /></label><label>5星技能名<input name="skill2" /></label><label>5星技能描述<input name="skill2Desc" /></label></div></details>
             </form>
@@ -90,7 +92,7 @@
           <div class="template-editor">
             <form id="checkin-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_checkin" /></label><label>模板名称<input name="name" placeholder="灵儿打卡" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="msyh_light">微软雅黑细体</option><option value="deng">等线</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="youyuan">幼圆（圆润）</option><option value="xingkai">华文行楷（手写）</option><option value="cute">圆润可爱（可替换）</option><option value="comic">手写卡通（可替换）</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="msyh_light">微软雅黑细体</option><option value="deng">等线</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="cute">圆润可爱</option><option value="comic">手写卡通</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
               <label class="wide">随机附言（最多 5 条，每次成功打卡随机使用一条）<textarea name="messages" rows="5" placeholder="每行一条随机附言"></textarea></label>
               <input name="background_image" type="hidden" />
               <div class="wide template-help">可用变量：<code>{title}</code>、<code>{reward}</code>、<code>{coins}</code>、<code>{message}</code>、<code>{date}</code>、<code>{user_name}</code>、<code>{user_id}</code>。<code>{message}</code> 的位置由下方文字行控制。</div>
@@ -118,7 +120,7 @@
           <div class="template-editor">
             <form id="status-template-form" class="template-form">
               <label>模板 ID<input name="id" placeholder="linger_status" /></label><label>模板名称<input name="name" placeholder="灵儿状态栏" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
-              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="msyh_light">微软雅黑细体</option><option value="deng">等线</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="youyuan">幼圆（圆润）</option><option value="xingkai">华文行楷（手写）</option><option value="cute">圆润可爱（可替换）</option><option value="comic">手写卡通（可替换）</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label>模板默认字体<select name="font_family"><option value="default">默认中文字体</option><option value="msyh">微软雅黑</option><option value="msyh_light">微软雅黑细体</option><option value="deng">等线</option><option value="simhei">黑体</option><option value="simsun">宋体</option><option value="kaiti">楷体</option><option value="cute">圆润可爱</option><option value="comic">手写卡通</option></select></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
               <input name="background_image" type="hidden" />
               <div class="wide template-help">可用变量：<code>{user_name}</code>、<code>{user_id}</code>、<code>{character_name}</code>、<code>{subtitle_name}</code>、<code>{quality}</code>、<code>{bonus}</code>、<code>{stars}</code>、<code>{level}</code>、<code>{current}</code>、<code>{need}</code>、<code>{skill_2_name}</code>、<code>{skill_2_desc}</code>、<code>{skill_3_name}</code>、<code>{skill_3_desc}</code>、<code>{skill_5_name}</code>、<code>{skill_5_desc}</code>。装备皮肤后，经验加成和技能优先读取皮肤填写的内容。</div>
               <fieldset class="wide progress-controls"><legend>经验条（绑定当前同伴经验）</legend><label class="checkline"><input name="progress_enabled" type="checkbox" checked />显示经验条</label><label class="progress-field">X<div class="range-control"><input data-progress-for="progress_x" type="range" min="0" max="1" step="0.01" value="0.441" /><input name="progress_x" type="number" min="0" max="1" step="0.01" value="0.441" /></div></label><label class="progress-field">Y<div class="range-control"><input data-progress-for="progress_y" type="range" min="0" max="1" step="0.01" value="0.440" /><input name="progress_y" type="number" min="0" max="1" step="0.01" value="0.440" /></div></label><label class="progress-field">宽度<div class="range-control"><input data-progress-for="progress_width" type="range" min="0.02" max="1" step="0.01" value="0.455" /><input name="progress_width" type="number" min="0.02" max="1" step="0.01" value="0.455" /></div></label><label class="progress-field">高度<div class="range-control"><input data-progress-for="progress_height" type="range" min="0.008" max="0.2" step="0.005" value="0.043" /><input name="progress_height" type="number" min="0.008" max="0.2" step="0.005" value="0.043" /></div></label><label>底色<input name="progress_background_color" type="color" value="#dbe2ef" /></label><label>填充色<input name="progress_color" type="color" value="#6d9bc6" /></label><label class="checkline"><input name="progress_auto_color" type="checkbox" checked />填充色跟随同伴/皮肤主色</label></fieldset>
@@ -134,8 +136,37 @@
         </div>
       </section>
 
+      <section class="board" id="mining-board">
+        <div class="board-title"><div><span>第四板块</span><h2>角色绑定的每日挖矿</h2><p>玩家需拥有同伴后发送 <code>挖矿</code>；每名玩家每日一次，从勾选的挖矿道具池按权重获得一个道具。每个角色/皮肤模板最多保存 6 张随机背景。</p></div><button id="new-mining-template" type="button">新增挖矿模板</button></div>
+        <div class="template-layout panel">
+          <aside class="template-sidebar"><section class="template-side-section"><div class="template-side-head"><h3>挖矿模板</h3><span>选择后编辑</span></div><div id="mining-template-list" class="character-list template-list"></div></section></aside>
+          <div class="template-editor">
+            <form id="mining-template-form" class="template-form">
+              <label>模板 ID<input name="id" placeholder="linger_mining" /></label><label>模板名称<input name="name" placeholder="灵儿挖矿" /></label><label>绑定角色 / 皮肤<select name="bound_entry_id" class="template-bound-entry"></select></label>
+              <label>优先级<input name="priority" type="number" min="-100" max="100" value="0" /></label><label class="checkline"><input name="enabled" type="checkbox" checked />启用该模板</label>
+              <div class="wide template-help">上传 1–6 张背景后，挖矿时会从当前同伴/皮肤匹配的模板中随机选取一张。道具图片、名称和挖矿权重在第一板块的“道具”条目中维护。</div>
+              <div id="mining-background-gallery" class="wide background-gallery"></div>
+            </form>
+            <div id="mining-background-dropzone" class="dropzone compact"><strong>上传挖矿背景（最多 6 张）</strong><span>选择、拖放，或点击后 Ctrl+V 粘贴图片。</span><input id="mining-background-upload" type="file" accept="image/png,image/jpeg,image/webp" multiple /></div>
+            <div class="upload-row"><button id="save-mining-template" type="button">保存挖矿模板</button><button id="delete-mining-template" class="danger" type="button">删除挖矿模板</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="board" id="draw-board">
+        <div class="board-title"><div><span>第五板块</span><h2>抽奖结果设计</h2><p>结果页只保留抽奖结果和保底框；上传一张全背景，并分别调整结果卡边框与保底框边框颜色。</p></div></div>
+        <section class="panel draw-design-panel">
+          <form id="draw-design-form" class="template-form">
+            <input name="background_image" type="hidden" />
+            <label>结果卡边框<input name="result_border_color" type="color" value="#e9f3ff" /></label><label>保底框边框<input name="pity_border_color" type="color" value="#b8d5f1" /></label>
+          </form>
+          <div id="draw-background-dropzone" class="dropzone compact"><strong>上传抽奖全背景</strong><span>上传后直接应用到抽奖结果；不再显示同伴/皮肤奖池框。</span><input id="draw-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
+          <div class="upload-row"><button id="save-draw-design" type="button">保存抽奖设计</button></div><img id="draw-design-preview" class="template-preview draw-design-preview" alt="抽奖背景预览" />
+        </section>
+      </section>
+
       <section class="board" id="assets-board">
-        <div class="board-title"><div><span>第四板块</span><h2>玩家资产发放与扣除</h2><p>可发放或收回同伴、皮肤和道具；道具可按数量扣除。经验球不会出现在此处。</p></div></div>
+        <div class="board-title"><div><span>第六板块</span><h2>玩家资产发放与扣除</h2><p>可发放或收回同伴、皮肤和道具；道具可按数量扣除。经验球不会出现在此处。</p></div></div>
         <section class="panel asset-panel">
           <div class="asset-grid">
             <label>已记录玩家<select id="known-player"></select></label><label>群 / 会话 Scope ID<input id="asset-scope" placeholder="群号或 session id" /></label><label>用户 ID<input id="asset-user" placeholder="QQ / 平台用户 ID" /></label><label>昵称<input id="asset-name" placeholder="发放时可填写" /></label>

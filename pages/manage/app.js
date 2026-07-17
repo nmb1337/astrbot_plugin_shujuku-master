@@ -31,10 +31,8 @@ const FONT_OPTIONS = [
   ['simhei', '黑体'],
   ['simsun', '宋体'],
   ['kaiti', '楷体'],
-  ['youyuan', '幼圆（圆润）'],
-  ['xingkai', '华文行楷（手写）'],
-  ['cute', '圆润可爱（可替换）'],
-  ['comic', '手写卡通（可替换）'],
+  ['cute', '圆润可爱'],
+  ['comic', '手写卡通'],
 ];
 const TEXT_WEIGHT_OPTIONS = [['regular', '常规'], ['bold', '粗'], ['heavy', '特粗']];
 
@@ -43,15 +41,19 @@ let players = [];
 let settings = {};
 let checkinTemplates = [];
 let statusTemplates = [];
+let miningTemplates = [];
+let drawDesign = {};
 let checkinAssets = [];
 let statusAssets = [];
 let selectedId = '';
 let selectedCheckinId = '';
 let selectedStatusId = '';
+let selectedMiningId = '';
 let selectedFilter = 'all';
 let activeImagePasteHandler = null;
 let checkinPreviewTimer = 0;
 let statusPreviewTimer = 0;
+let miningBackgrounds = [];
 const templatePreviewVersion = { checkin: 0, status: 0 };
 
 const bridge = () => window.AstrBotPluginPage || {};
@@ -157,13 +159,18 @@ async function loadAll() {
   statusTemplates = payload.status_templates || [];
   checkinAssets = payload.checkin_assets || [];
   statusAssets = payload.status_assets || [];
+  miningTemplates = payload.mining_templates || [];
+  drawDesign = payload.draw_design || drawDesign;
   if (!selectedId && characters[0]) selectedId = characters[0].id;
   if (!selectedCheckinId && checkinTemplates[0]) selectedCheckinId = checkinTemplates[0].id;
   if (!selectedStatusId && statusTemplates[0]) selectedStatusId = statusTemplates[0].id;
+  if (!selectedMiningId && miningTemplates[0]) selectedMiningId = miningTemplates[0].id;
   renderColorGroup(); renderList(); renderParentOptions(); renderBoundOptions(); renderPlayerOptions(); renderAssetOptions(); fillSettings();
   fillCharacter(characters.find((entry) => entry.id === selectedId) || characters[0]);
   renderTemplateList('checkin'); fillTemplate('checkin', checkinTemplates.find((entry) => entry.id === selectedCheckinId) || checkinTemplates[0]);
   renderTemplateList('status'); fillTemplate('status', statusTemplates.find((entry) => entry.id === selectedStatusId) || statusTemplates[0]);
+  renderMiningTemplateList(); fillMiningTemplate(miningTemplates.find((entry) => entry.id === selectedMiningId) || miningTemplates[0]);
+  fillDrawDesign(drawDesign);
   renderTemplateAssetList('checkin'); renderTemplateAssetList('status');
 }
 
@@ -190,7 +197,7 @@ function renderList() {
     const description = entry.kind === 'experience_ball'
       ? `${entry.exp_amount || 0} EXP · 权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
       : entry.kind === 'item'
-        ? `${entry.quality || '未标注品质'} · 抽取权重 ${entry.draw_weight || 1} ${entry.in_pool ? '· 奖池' : ''}`
+        ? `${entry.quality || '未标注品质'} · 抽取 ${entry.draw_weight || 1}${entry.in_pool ? ' · 奖池' : ''}${entry.mining_pool ? ` · 挖矿 ${entry.mining_weight || 1}` : ''}`
       : `${entry.english_name || entry.quality || entry.star || '—'} ${entry.in_pool ? '· 奖池' : ''}`;
     item.innerHTML = `<img src="${entry.preview || assetUrl(entry.image)}" alt="" /><span><strong>${escapeHtml(entry.kind === 'skin' ? `↳ ${entry.name}` : entry.name)}</strong><span>${escapeHtml(description)}</span></span>`;
     item.addEventListener('click', () => { selectedId = entry.id; renderList(); fillCharacter(entry); });
@@ -255,7 +262,7 @@ function fillCharacter(entry) {
   setValue(form, 'kind', entry.kind || 'companion'); setValue(form, 'id', entry.id); setValue(form, 'name', entry.name); setValue(form, 'english_name', entry.english_name || entry.skin || '');
   setValue(form, 'quality', entry.quality || entry.star || 'R'); setValue(form, 'parent_id', entry.parent_id || ''); setValue(form, 'exclusive_items', exclusiveItemNames(entry).join('\n'));
   setValue(form, 'route', entry.route || ''); setValue(form, 'bonus', entry.bonus || ''); setValue(form, 'intro', entry.intro || ''); setValue(form, 'effect', entry.effect || ''); setValue(form, 'image', entry.image || '');
-  setValue(form, 'focal_x', entry.focal_x ?? 0.5); setValue(form, 'focal_y', entry.focal_y ?? 0.5); setValue(form, 'exp_amount', entry.exp_amount ?? 10); setValue(form, 'draw_weight', entry.draw_weight ?? 10); setChecked(form, 'in_pool', entry.in_pool);
+  setValue(form, 'focal_x', entry.focal_x ?? 0.5); setValue(form, 'focal_y', entry.focal_y ?? 0.5); setValue(form, 'exp_amount', entry.exp_amount ?? 10); setValue(form, 'draw_weight', entry.draw_weight ?? 10); setValue(form, 'mining_weight', entry.mining_weight ?? 10); setChecked(form, 'mining_pool', entry.mining_pool); setChecked(form, 'in_pool', entry.in_pool);
   const skills = entry.skills || []; [0, 1, 2].forEach((index) => { setValue(form, `skill${index}`, skills[index]?.[0] || ''); setValue(form, `skill${index}Desc`, skills[index]?.[1] || ''); });
   $('#parent-companion').value = entry.parent_id || '';
   toggleKindFields(entry.kind || 'companion');
@@ -271,7 +278,7 @@ function readCharacter() {
   return {
     id: form.elements.id.value.trim(), kind, name: form.elements.name.value.trim(), english_name: form.elements.english_name.value.trim(), quality: form.elements.quality.value.trim(), parent_id: form.elements.parent_id.value,
     exclusive_items: form.elements.exclusive_items.value.trim(), route: form.elements.route.value.trim(), bonus: form.elements.bonus.value.trim(), intro: form.elements.intro.value.trim(), effect: form.elements.effect.value.trim(), image: form.elements.image.value.trim(), in_pool: form.elements.in_pool.checked,
-    focal_x: numberValue(form.elements.focal_x.value, 0.5), focal_y: numberValue(form.elements.focal_y.value, 0.5), exp_amount: numberValue(form.elements.exp_amount.value, 10), draw_weight: numberValue(form.elements.draw_weight.value, 10),
+    focal_x: numberValue(form.elements.focal_x.value, 0.5), focal_y: numberValue(form.elements.focal_y.value, 0.5), exp_amount: numberValue(form.elements.exp_amount.value, 10), draw_weight: numberValue(form.elements.draw_weight.value, 10), mining_pool: form.elements.mining_pool.checked, mining_weight: numberValue(form.elements.mining_weight.value, 10),
     skills: [[form.elements.skill0.value.trim(), form.elements.skill0Desc.value.trim()], [form.elements.skill1.value.trim(), form.elements.skill1Desc.value.trim()], [form.elements.skill2.value.trim(), form.elements.skill2Desc.value.trim()]],
   };
 }
@@ -283,22 +290,26 @@ function blobAsFile(blob, fallback) {
 }
 function bindImageDropzone(zoneSelector, inputSelector, handler, fallbackName) {
   const zone = $(zoneSelector); const input = $(inputSelector);
-  input.addEventListener('change', () => safely(() => handler(input.files[0])));
+  const dispatchFiles = (files) => {
+    const selected = [...(files || [])].filter(Boolean);
+    return handler(input.multiple ? selected : selected[0]);
+  };
+  input.addEventListener('change', () => safely(() => dispatchFiles(input.files)));
   zone.addEventListener('focus', () => { activeImagePasteHandler = handler; });
   zone.addEventListener('click', () => { activeImagePasteHandler = handler; zone.focus(); input.click(); });
   zone.addEventListener('dragover', (event) => { event.preventDefault(); zone.classList.add('dragging'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
-  zone.addEventListener('drop', (event) => { event.preventDefault(); zone.classList.remove('dragging'); safely(() => handler(event.dataTransfer.files[0])); });
+  zone.addEventListener('drop', (event) => { event.preventDefault(); zone.classList.remove('dragging'); safely(() => dispatchFiles(event.dataTransfer.files)); });
   zone.addEventListener('paste', (event) => {
     const item = [...(event.clipboardData?.items || [])].find((candidate) => candidate.type?.startsWith('image/'));
     if (!item) { toast('剪贴板中没有真实图片文件。'); return; }
-    event.preventDefault(); safely(() => handler(blobAsFile(item.getAsFile(), fallbackName)));
+    event.preventDefault(); safely(() => dispatchFiles([blobAsFile(item.getAsFile(), fallbackName)]));
   });
   document.addEventListener('paste', (event) => {
     if (event.defaultPrevented || activeImagePasteHandler !== handler) return;
     const item = [...(event.clipboardData?.items || [])].find((candidate) => candidate.type?.startsWith('image/'));
     if (!item) return;
-    event.preventDefault(); safely(() => handler(blobAsFile(item.getAsFile(), fallbackName)));
+    event.preventDefault(); safely(() => dispatchFiles([blobAsFile(item.getAsFile(), fallbackName)]));
   });
   document.addEventListener('focusin', (event) => { if (!zone.contains(event.target)) activeImagePasteHandler = null; });
 }
@@ -486,6 +497,88 @@ function bindProgressControls(type) {
   });
 }
 
+function miningTemplateDefaults() {
+  return { id: '', name: '', bound_entry_id: '', priority: 0, enabled: true, background_images: [] };
+}
+function renderMiningTemplateList() {
+  const element = $('#mining-template-list'); element.innerHTML = '';
+  const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = '模板（可滚动）'; element.appendChild(heading);
+  miningTemplates.forEach((template) => {
+    const item = document.createElement('button'); item.type = 'button'; item.className = `character-item ${template.id === selectedMiningId ? 'active' : ''}`;
+    const binding = template.bound_entry_id ? (characters.find((entry) => entry.id === template.bound_entry_id)?.name || '已删除绑定') : '通用';
+    const backgrounds = Array.isArray(template.background_images) ? template.background_images : [];
+    const image = backgrounds[0] || '';
+    item.innerHTML = `<img src="${assetUrl(image, 'mining-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}<br />背景 ${backgrounds.length}/6</span></span>`;
+    item.addEventListener('click', () => { selectedMiningId = template.id; renderMiningTemplateList(); fillMiningTemplate(template); });
+    element.appendChild(item);
+  });
+  if (!miningTemplates.length) element.innerHTML = '<p class="empty">暂无挖矿模板。</p>';
+}
+function renderMiningBackgroundGallery() {
+  const gallery = $('#mining-background-gallery'); gallery.innerHTML = '';
+  miningBackgrounds.forEach((filename, index) => {
+    const card = document.createElement('div'); card.className = 'background-card';
+    card.innerHTML = `<img src="${assetUrl(filename, 'mining-assets')}" alt="挖矿背景 ${index + 1}" /><span title="${escapeHtml(filename)}">背景 ${index + 1}：${escapeHtml(filename)}</span><button class="danger small" type="button" title="从本模板移除">×</button>`;
+    card.querySelector('button').addEventListener('click', () => {
+      miningBackgrounds.splice(index, 1); renderMiningBackgroundGallery();
+    });
+    gallery.appendChild(card);
+  });
+}
+function fillMiningTemplate(template) {
+  const form = $('#mining-template-form'); const data = template || miningTemplateDefaults();
+  selectedMiningId = data.id || '';
+  setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setChecked(form, 'enabled', data.enabled !== false);
+  miningBackgrounds = Array.isArray(data.background_images) ? data.background_images.slice(0, 6) : [];
+  renderMiningBackgroundGallery();
+}
+function readMiningTemplate() {
+  const form = $('#mining-template-form');
+  return {
+    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value,
+    priority: numberValue(form.elements.priority.value, 0), enabled: form.elements.enabled.checked,
+    background_images: miningBackgrounds.slice(0, 6),
+  };
+}
+async function uploadMiningBackgrounds(files) {
+  const selected = Array.isArray(files) ? files : [files];
+  let uploaded = 0;
+  for (const file of selected) {
+    if (miningBackgrounds.length >= 6) { toast('每个挖矿模板最多保存 6 张背景。'); break; }
+    if (!file?.type?.startsWith('image/')) { toast('请上传 PNG、JPG 或 WebP 图片。'); continue; }
+    const result = normalizeResponse(await upload('/upload-mining-image', file));
+    if (!result.image) throw new Error('挖矿背景上传失败。');
+    miningBackgrounds.push(result.image); uploaded += 1;
+  }
+  renderMiningBackgroundGallery();
+  if (uploaded) toast(`已加入 ${uploaded} 张挖矿背景；保存模板后生效。`);
+}
+
+function fillDrawDesign(design) {
+  const form = $('#draw-design-form'); const data = design || {};
+  setValue(form, 'background_image', data.background_image || '');
+  setValue(form, 'result_border_color', data.result_border_color || '#e9f3ff');
+  setValue(form, 'pity_border_color', data.pity_border_color || '#b8d5f1');
+  const preview = $('#draw-design-preview');
+  if (data.background_image) preview.src = assetUrl(data.background_image, 'draw-assets'); else preview.removeAttribute('src');
+}
+function readDrawDesign() {
+  const form = $('#draw-design-form');
+  return {
+    background_image: form.elements.background_image.value.trim(),
+    result_border_color: form.elements.result_border_color.value,
+    pity_border_color: form.elements.pity_border_color.value,
+  };
+}
+async function uploadDrawBackground(file) {
+  if (!file?.type?.startsWith('image/')) { toast('请上传 PNG、JPG 或 WebP 图片。'); return; }
+  const result = normalizeResponse(await upload('/upload-draw-image', file));
+  if (!result.image) throw new Error('抽奖背景上传失败。');
+  $('#draw-design-form').elements.background_image.value = result.image;
+  $('#draw-design-preview').src = URL.createObjectURL(file);
+  toast('抽奖背景已上传；保存抽奖设计后生效。');
+}
+
 function assetPayload() {
   return { scope_id: $('#asset-scope').value.trim(), user_id: $('#asset-user').value.trim(), name: $('#asset-name').value.trim() };
 }
@@ -563,6 +656,29 @@ function bindEvents() {
     bindProgressControls(type);
     bindImageDropzone(`#${type}-background-dropzone`, `#${type}-background-upload`, (file) => uploadTemplateLayer(type, 'background_image', file), `pasted-${type}-background.png`);
   });
+
+  $('#new-mining-template').addEventListener('click', () => {
+    selectedMiningId = ''; fillMiningTemplate(miningTemplateDefaults()); renderMiningTemplateList();
+  });
+  $('#save-mining-template').addEventListener('click', () => safely(async () => {
+    const template = readMiningTemplate();
+    if (!template.id || !template.name) { toast('挖矿模板 ID 和名称必填。'); return; }
+    const result = normalizeResponse(await apiPost('/mining-templates', template));
+    selectedMiningId = result.template?.id || template.id;
+    toast('已保存挖矿模板。'); await loadAll();
+  }));
+  $('#delete-mining-template').addEventListener('click', () => safely(async () => {
+    const form = $('#mining-template-form'); const id = form.elements.id.value.trim(); const button = $('#delete-mining-template');
+    if (!id || !confirmDelete(button, `删除挖矿模板 ${id}`)) return;
+    await apiDelete(`/mining-templates/${id}`); selectedMiningId = ''; toast('已删除挖矿模板。'); await loadAll();
+  }));
+  bindImageDropzone('#mining-background-dropzone', '#mining-background-upload', uploadMiningBackgrounds, 'pasted-mining-background.png');
+
+  $('#save-draw-design').addEventListener('click', () => safely(async () => {
+    const result = normalizeResponse(await apiPost('/draw-design', readDrawDesign()));
+    drawDesign = result.draw_design || readDrawDesign(); fillDrawDesign(drawDesign); toast('已保存抽奖设计。');
+  }));
+  bindImageDropzone('#draw-background-dropzone', '#draw-background-upload', uploadDrawBackground, 'pasted-draw-background.png');
 }
 
 async function boot() {

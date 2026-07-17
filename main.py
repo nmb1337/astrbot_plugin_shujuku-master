@@ -22,6 +22,10 @@ LEVEL_REQUIREMENTS = [1000, 2000, 3000, 4000, 5000]
 DRAW_COST = 10
 DRAW_COUNT = 5
 DRAW_PITY_TARGET = 100
+DRAW_EXPERIENCE_RATE = 86
+DRAW_ITEM_RATE = 13
+DRAW_COMPANION_RATE = 0.5
+DRAW_SKIN_RATE = 0.5
 CHECKIN_MESSAGE_LIMIT = 5
 WINNING_NUMBER_MIN = 1
 WINNING_NUMBER_MAX = 100
@@ -62,8 +66,6 @@ FONT_FAMILIES = (
     "simhei",
     "simsun",
     "kaiti",
-    "youyuan",
-    "xingkai",
     "cute",
     "comic",
 )
@@ -167,7 +169,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     },
 ]
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡与抽奖插件", "2.3.1")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡、挖矿与抽奖插件", "2.5.0")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -176,17 +178,23 @@ class JubenNpcPlugin(Star):
         self.assets_dir = self.data_dir / "npc_assets"
         self.checkin_assets_dir = self.data_dir / "checkin_assets"
         self.status_assets_dir = self.data_dir / "status_assets"
+        self.mining_assets_dir = self.data_dir / "mining_assets"
+        self.draw_assets_dir = self.data_dir / "draw_assets"
         self.font_dir = self.data_dir / "fonts"
         self.render_dir = self.data_dir / "rendered"
         self.db_path = self.data_dir / "players.json"
         self.characters_path = self.data_dir / "characters.json"
         self.checkin_templates_path = self.data_dir / "checkin_templates.json"
         self.status_templates_path = self.data_dir / "status_templates.json"
+        self.mining_templates_path = self.data_dir / "mining_templates.json"
+        self.draw_design_path = self.data_dir / "draw_design.json"
         self.settings_path = self.data_dir / "settings.json"
         self.db: Dict[str, Any] = {"scopes": {}}
         self.characters: List[Dict[str, Any]] = []
         self.checkin_templates: List[Dict[str, Any]] = []
         self.status_templates: List[Dict[str, Any]] = []
+        self.mining_templates: List[Dict[str, Any]] = []
+        self.draw_design: Dict[str, Any] = self._default_draw_design()
         self.settings: Dict[str, str] = dict(DEFAULT_VISUAL_SETTINGS)
         self._font_cache: Dict[Tuple[int, bool, str], ImageFont.FreeTypeFont] = {}
         self._warned_missing_font = False
@@ -197,12 +205,16 @@ class JubenNpcPlugin(Star):
         self.assets_dir.mkdir(exist_ok=True)
         self.checkin_assets_dir.mkdir(exist_ok=True)
         self.status_assets_dir.mkdir(exist_ok=True)
+        self.mining_assets_dir.mkdir(exist_ok=True)
+        self.draw_assets_dir.mkdir(exist_ok=True)
         self.font_dir.mkdir(exist_ok=True)
         self.render_dir.mkdir(exist_ok=True)
         self._load_db()
         self._load_characters()
         self._load_checkin_templates()
         self._load_status_templates()
+        self._load_mining_templates()
+        self._load_draw_design()
         self._load_settings()
         self._ensure_fonts()
         self._ensure_assets()
@@ -213,6 +225,8 @@ class JubenNpcPlugin(Star):
         self._save_characters()
         self._save_checkin_templates()
         self._save_status_templates()
+        self._save_mining_templates()
+        self._save_draw_design()
         self._save_settings()
 
     async def help_cmd(self, event: AstrMessageEvent):
@@ -226,6 +240,7 @@ class JubenNpcPlugin(Star):
                 "状态栏 - 直接触发，查看当前同伴状态",
                 "/切换同伴 名称 - 更换当前同伴或装备皮肤（/切换角色 仍兼容）",
                 "抽奖 - 直接触发，消耗 10 星币进行 5 抽",
+                "挖矿 - 直接触发，拥有同伴后每天可领取一次矿池道具",
                 "/中奖号码 - 机器人在固定范围内随机生成中奖号",
                 "同伴栏 [页码] - 直接触发，查看已获得同伴与皮肤",
                 "道具栏 [页码] - 直接触发，查看已获得道具",
@@ -251,19 +266,20 @@ class JubenNpcPlugin(Star):
             "状态栏": self.status_cmd,
             "同伴栏": self.inventory_cmd,
             "道具栏": self.item_inventory_cmd,
+            "挖矿": self.mining_cmd,
             "切换同伴": self.switch_cmd,
             "切换角色": self.switch_cmd,
             "更换角色": self.switch_cmd,
             "选择角色": self.switch_cmd,
         }
         direct_match = re.fullmatch(
-            r"(打卡|抽奖|状态栏|同伴栏|道具栏|切换同伴|切换角色|更换角色|选择角色)(.*)",
+            r"(打卡|抽奖|状态栏|同伴栏|道具栏|挖矿|切换同伴|切换角色|更换角色|选择角色)(.*)",
             text,
         )
         if direct_match:
             command, suffix = direct_match.groups()
             valid = True
-            if command in {"打卡", "抽奖"}:
+            if command in {"打卡", "抽奖", "挖矿"}:
                 valid = not suffix.strip()
             elif command in {"同伴栏", "道具栏"}:
                 valid = self._is_page_argument(suffix)
@@ -318,10 +334,9 @@ class JubenNpcPlugin(Star):
             target["coins"],
         )
 
-        path = self._render_text_card(
+        path = self._render_compact_notice_card(
             "星币已发放",
-            [f"对象：{target_label}", f"发放数量：{amount}", f"对方余额：{target['coins']}"],
-            subtitle="可用此命令给群员补发活动星币。",
+            [f"对象：{target_label}", f"发放 +{amount} 星币", f"当前余额：{target['coins']} 星币"],
         )
         yield event.image_result(str(path))
 
@@ -385,6 +400,11 @@ class JubenNpcPlugin(Star):
     @filter.command("打卡", alias={"每日打卡"})
     async def checkin_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
+        if not player.get("npcs") or not player.get("current_npc"):
+            yield event.image_result(
+                str(self._render_notice_card("无法打卡", "请先获得并切换一名同伴后再打卡。"))
+            )
+            return
         today = datetime.now().strftime("%Y-%m-%d")
         if player.get("last_checkin") == today:
             path = self._render_checkin_card(
@@ -473,11 +493,6 @@ class JubenNpcPlugin(Star):
     @filter.command("抽奖", alias={"npc抽奖", "NPC抽奖"})
     async def draw_cmd(self, event: AstrMessageEvent):
         player = self._get_player(event)
-        if not player.get("current_npc") or not player.get("npcs"):
-            yield event.image_result(
-                str(self._render_notice_card("无法抽奖", "你当前没有可获得经验的同伴，请先由管理员发放或通过活动获得同伴。"))
-            )
-            return
         count = DRAW_COUNT
         coin_cost = DRAW_COST
         pool_gaps = self._draw_pool_gaps()
@@ -498,6 +513,31 @@ class JubenNpcPlugin(Star):
         self._save_db()
 
         path = self._render_draw(player, results, coin_cost, 0)
+        yield event.image_result(str(path))
+
+    @filter.command("挖矿", alias={"每日挖矿", "挖矿领取"})
+    async def mining_cmd(self, event: AstrMessageEvent):
+        player = self._get_player(event)
+        companion_id = str(player.get("current_npc") or "")
+        companion = self._character_or_none(companion_id)
+        if not companion or companion.get("kind") != COMPANION_KIND or companion_id not in player.get("npcs", {}):
+            yield event.image_result(str(self._render_notice_card("无法挖矿", "请先获得并切换一名同伴后再挖矿。")))
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        if player.get("last_mining") == today:
+            yield event.image_result(str(self._render_notice_card("今日已挖矿", "明天再和同伴一起探索新的矿点吧。")))
+            return
+        pool = self._mining_pool()
+        if not pool:
+            yield event.image_result(str(self._render_notice_card("矿池尚未配置", "请在后台为至少一个道具勾选“加入挖矿池”。")))
+            return
+        weights = [max(1, int(item.get("mining_weight", 10) or 10)) for item in pool]
+        item = random.choices(pool, weights=weights, k=1)[0]
+        self._grant_character(player, item["id"])
+        player["last_mining"] = today
+        self._save_db()
+        template = self._mining_template_for(player, companion_id)
+        path = self._render_mining(player, companion, item, template)
         yield event.image_result(str(path))
 
     @filter.command("中奖号码", alias={"开奖"})
@@ -598,6 +638,20 @@ class JubenNpcPlugin(Star):
                         }
                         for template in self.status_templates
                     ],
+                    "mining_templates": [
+                        {
+                            **template,
+                            "previews": [
+                                self._thumbnail_data_url(self.mining_assets_dir / filename, (120, 68))
+                                for filename in template.get("background_images", [])[:6]
+                            ],
+                        }
+                        for template in self.mining_templates
+                    ],
+                    "draw_design": {
+                        **self.draw_design,
+                        "preview": self._thumbnail_data_url(self.draw_assets_dir / self.draw_design.get("background_image", "")),
+                    },
                     # Templates are not a file browser: an uploaded background
                     # may exist before it is assigned to a template.  Return the
                     # actual image directories separately so the Page can offer
@@ -663,6 +717,29 @@ class JubenNpcPlugin(Star):
 
         async def list_status_templates():
             return jsonify({"status_templates": self.status_templates})
+
+        async def list_mining_templates():
+            return jsonify({"mining_templates": self.mining_templates})
+
+        async def save_mining_template():
+            data = (await request.get_json()) or {}
+            template = self._normalize_mining_template(data)
+            for index, item in enumerate(self.mining_templates):
+                if item["id"] == template["id"]:
+                    self.mining_templates[index] = template
+                    break
+            else:
+                self.mining_templates.append(template)
+            self._save_mining_templates()
+            return jsonify({"ok": True, "template": template})
+
+        async def delete_mining_template(template_id: str):
+            before = len(self.mining_templates)
+            self.mining_templates = [item for item in self.mining_templates if item["id"] != template_id]
+            if not self.mining_templates:
+                self.mining_templates = [self._default_mining_template()]
+            self._save_mining_templates()
+            return jsonify({"ok": True, "deleted": before != len(self.mining_templates)})
 
         async def save_checkin_template():
             data = (await request.get_json()) or {}
@@ -766,6 +843,53 @@ class JubenNpcPlugin(Star):
                 logger.warning(f"状态栏模板备用上传失败：{exc}")
                 return jsonify({"status": "error", "message": str(exc)}), 400
             return jsonify({"ok": True, "image": saved_name, "url": f"status-assets/{saved_name}"})
+
+        async def upload_mining_image():
+            file = await self._request_upload_file()
+            if file is None:
+                return jsonify({"status": "error", "message": "没有收到挖矿背景图片文件。"}), 400
+            try:
+                saved_name = await self._save_uploaded_image(file, self.mining_assets_dir, "mining")
+            except Exception as exc:
+                logger.warning(f"挖矿背景上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"mining-assets/{saved_name}"})
+
+        async def upload_mining_image_data_url():
+            try:
+                saved_name = await self._save_data_url_image((await request.get_json()) or {}, self.mining_assets_dir, "mining")
+            except Exception as exc:
+                logger.warning(f"挖矿背景备用上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"mining-assets/{saved_name}"})
+
+        async def get_draw_design():
+            return jsonify({"draw_design": self.draw_design, "preview": self._thumbnail_data_url(self.draw_assets_dir / self.draw_design.get("background_image", ""))})
+
+        async def save_draw_design():
+            data = (await request.get_json()) or {}
+            self.draw_design = self._normalize_draw_design(data)
+            self._save_draw_design()
+            return jsonify({"ok": True, "draw_design": self.draw_design})
+
+        async def upload_draw_image():
+            file = await self._request_upload_file()
+            if file is None:
+                return jsonify({"status": "error", "message": "没有收到抽奖背景图片文件。"}), 400
+            try:
+                saved_name = await self._save_uploaded_image(file, self.draw_assets_dir, "draw")
+            except Exception as exc:
+                logger.warning(f"抽奖背景上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"draw-assets/{saved_name}"})
+
+        async def upload_draw_image_data_url():
+            try:
+                saved_name = await self._save_data_url_image((await request.get_json()) or {}, self.draw_assets_dir, "draw")
+            except Exception as exc:
+                logger.warning(f"抽奖背景备用上传失败：{exc}")
+                return jsonify({"status": "error", "message": str(exc)}), 400
+            return jsonify({"ok": True, "image": saved_name, "url": f"draw-assets/{saved_name}"})
 
         async def preview_checkin_template():
             data = (await request.get_json()) or {}
@@ -885,6 +1009,18 @@ class JubenNpcPlugin(Star):
                 return jsonify({"status": "error", "message": "状态栏模板图片不存在。"}), 404
             return await send_file(path)
 
+        async def get_mining_asset(filename: str):
+            path = self.mining_assets_dir / Path(filename).name
+            if not path.exists():
+                return jsonify({"status": "error", "message": "挖矿背景图片不存在。"}), 404
+            return await send_file(path)
+
+        async def get_draw_asset(filename: str):
+            path = self.draw_assets_dir / Path(filename).name
+            if not path.exists():
+                return jsonify({"status": "error", "message": "抽奖背景图片不存在。"}), 404
+            return await send_file(path)
+
         context.register_web_api(f"/{PLUGIN_NAME}/characters", list_characters, ["GET"], "List NPC characters")
         context.register_web_api(f"/{PLUGIN_NAME}/characters", save_character, ["POST"], "Save NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/characters/<character_id>/delete", delete_character, ["POST"], "Delete NPC character")
@@ -904,6 +1040,15 @@ class JubenNpcPlugin(Star):
         context.register_web_api(f"/{PLUGIN_NAME}/upload-status-image", upload_status_image, ["POST"], "Upload status template layer")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-status-image/data-url", upload_status_image_data_url, ["POST"], "Upload status template layer fallback")
         context.register_web_api(f"/{PLUGIN_NAME}/status-templates/preview", preview_status_template, ["POST"], "Preview status template")
+        context.register_web_api(f"/{PLUGIN_NAME}/mining-templates", list_mining_templates, ["GET"], "List mining templates")
+        context.register_web_api(f"/{PLUGIN_NAME}/mining-templates", save_mining_template, ["POST"], "Save mining template")
+        context.register_web_api(f"/{PLUGIN_NAME}/mining-templates/<template_id>/delete", delete_mining_template, ["POST"], "Delete mining template")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-mining-image", upload_mining_image, ["POST"], "Upload mining image")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-mining-image/data-url", upload_mining_image_data_url, ["POST"], "Upload mining image fallback")
+        context.register_web_api(f"/{PLUGIN_NAME}/draw-design", get_draw_design, ["GET"], "Get draw design")
+        context.register_web_api(f"/{PLUGIN_NAME}/draw-design", save_draw_design, ["POST"], "Save draw design")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-draw-image", upload_draw_image, ["POST"], "Upload draw image")
+        context.register_web_api(f"/{PLUGIN_NAME}/upload-draw-image/data-url", upload_draw_image_data_url, ["POST"], "Upload draw image fallback")
         context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
         context.register_web_api(f"/{PLUGIN_NAME}/revoke", revoke_character, ["POST"], "Revoke NPC character or item")
         context.register_web_api(f"/{PLUGIN_NAME}/grant-exclusive", grant_exclusive_item, ["POST"], "Grant companion exclusive item")
@@ -912,6 +1057,8 @@ class JubenNpcPlugin(Star):
         context.register_web_api(f"/{PLUGIN_NAME}/assets/<filename>", get_asset, ["GET"], "Get NPC image")
         context.register_web_api(f"/{PLUGIN_NAME}/checkin-assets/<filename>", get_checkin_asset, ["GET"], "Get check-in background")
         context.register_web_api(f"/{PLUGIN_NAME}/status-assets/<filename>", get_status_asset, ["GET"], "Get status template layer")
+        context.register_web_api(f"/{PLUGIN_NAME}/mining-assets/<filename>", get_mining_asset, ["GET"], "Get mining template background")
+        context.register_web_api(f"/{PLUGIN_NAME}/draw-assets/<filename>", get_draw_asset, ["GET"], "Get draw design background")
 
     def _load_db(self):
         if not self.db_path.exists():
@@ -969,9 +1116,9 @@ class JubenNpcPlugin(Star):
     def _migrate_database(self):
         if not isinstance(self.db, dict):
             self.db = {"scopes": {}}
-        if int(self.db.get("schema_version", 1) or 1) >= 2:
-            return
-        self._backup_once(self.db_path, "v1")
+        previous_version = int(self.db.get("schema_version", 1) or 1)
+        if previous_version < 2:
+            self._backup_once(self.db_path, "v1")
         scopes = self.db.setdefault("scopes", {})
         if not isinstance(scopes, dict):
             scopes = self.db["scopes"] = {}
@@ -989,16 +1136,19 @@ class JubenNpcPlugin(Star):
                 player.setdefault("items", {})
                 player.setdefault("exclusive_items", {})
                 player.setdefault("current_skin", "")
+                player.setdefault("last_mining", "")
+                player.setdefault("allow_empty_npcs", False)
                 player.setdefault(
                     "draw_state",
-                    {"pity_count": 0, "next_pity_kind": "random"},
+                    {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": "companion"},
                 )
                 for value in player.get("npcs", {}).values():
                     if isinstance(value, dict):
                         value.setdefault("owned_at", value.get("obtained_at", ""))
                         value.setdefault("full_at", "")
-        self.db["schema_version"] = 2
-        self._save_db()
+        if previous_version < 3:
+            self.db["schema_version"] = 3
+            self._save_db()
 
     def _load_characters(self):
         if not self.characters_path.exists():
@@ -1116,6 +1266,25 @@ class JubenNpcPlugin(Star):
             },
         }
 
+    @staticmethod
+    def _default_draw_design() -> Dict[str, Any]:
+        return {
+            "background_image": "",
+            "result_border_color": "#e9f3ff",
+            "pity_border_color": "#b8d5f1",
+        }
+
+    @staticmethod
+    def _default_mining_template() -> Dict[str, Any]:
+        return {
+            "id": "default",
+            "name": "通用挖矿样式",
+            "bound_entry_id": "",
+            "priority": 0,
+            "enabled": True,
+            "background_images": [],
+        }
+
     def _load_checkin_templates(self):
         if not self.checkin_templates_path.exists():
             self.checkin_templates = [self._default_checkin_template()]
@@ -1154,11 +1323,74 @@ class JubenNpcPlugin(Star):
     def _save_status_templates(self):
         self._write_json_atomic(self.status_templates_path, {"templates": self.status_templates})
 
+    def _load_mining_templates(self):
+        if not self.mining_templates_path.exists():
+            self.mining_templates = [self._default_mining_template()]
+            self._save_mining_templates()
+            return
+        try:
+            raw = json.loads(self.mining_templates_path.read_text(encoding="utf-8"))
+            templates = raw.get("templates", raw) if isinstance(raw, dict) else raw
+            self.mining_templates = [self._normalize_mining_template(item) for item in templates if isinstance(item, dict)]
+        except Exception as exc:
+            logger.error(f"读取挖矿模板失败，将使用默认样式：{exc}")
+            self.mining_templates = []
+        if not self.mining_templates:
+            self.mining_templates = [self._default_mining_template()]
+        self._save_mining_templates()
+
+    def _save_mining_templates(self):
+        self._write_json_atomic(self.mining_templates_path, {"templates": self.mining_templates})
+
+    def _load_draw_design(self):
+        if not self.draw_design_path.exists():
+            self.draw_design = self._default_draw_design()
+            self._save_draw_design()
+            return
+        try:
+            raw = json.loads(self.draw_design_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.error(f"读取抽奖设计失败，将使用默认样式：{exc}")
+            raw = {}
+        self.draw_design = self._normalize_draw_design(raw if isinstance(raw, dict) else {})
+        self._save_draw_design()
+
+    def _save_draw_design(self):
+        self._write_json_atomic(self.draw_design_path, self.draw_design)
+
     def _normalize_checkin_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return self._normalize_visual_template(data, self._default_checkin_template())
 
     def _normalize_status_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return self._normalize_visual_template(data, self._default_status_template())
+
+    def _normalize_mining_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        base = self._default_mining_template()
+        template_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(data.get("id") or "").strip()).strip("_")
+        base["id"] = template_id or f"mining_{int(datetime.now().timestamp())}"
+        base["name"] = str(data.get("name") or base["name"]).strip()[:60]
+        bound_entry_id = str(data.get("bound_entry_id") or "").strip()
+        bound = self._character_or_none(bound_entry_id)
+        base["bound_entry_id"] = bound_entry_id if bound and bound.get("kind") in {COMPANION_KIND, SKIN_KIND} else ""
+        try:
+            base["priority"] = max(-100, min(100, int(data.get("priority", 0) or 0)))
+        except (TypeError, ValueError):
+            base["priority"] = 0
+        base["enabled"] = self._template_bool(data.get("enabled", True))
+        images = data.get("background_images", data.get("background_image", []))
+        if isinstance(images, str):
+            images = [images]
+        base["background_images"] = [Path(str(item)).name for item in images if str(item).strip()][:6] if isinstance(images, (list, tuple)) else []
+        return base
+
+    def _normalize_draw_design(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        base = self._default_draw_design()
+        background = Path(str(data.get("background_image") or "")).name
+        base["background_image"] = background
+        for key in ("result_border_color", "pity_border_color"):
+            value = str(data.get(key) or base[key])
+            base[key] = value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else base[key]
+        return base
 
     def _normalize_visual_template(self, data: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
         """Validate a role-bound background and its independently editable text.
@@ -1398,6 +1630,8 @@ class JubenNpcPlugin(Star):
                 # Quality is now display-only.  All checked items share one
                 # draw pool and use this explicit relative weight instead.
                 "draw_weight": int(self._template_number(data.get("draw_weight"), 10, 1, 1000)),
+                "mining_pool": self._template_bool(data.get("mining_pool", False)),
+                "mining_weight": int(self._template_number(data.get("mining_weight"), 10, 1, 1000)),
                 "effect": str(data.get("effect") or "暂未填写效果。").strip(),
                 "image": image,
                 "in_pool": in_pool,
@@ -1587,15 +1821,15 @@ class JubenNpcPlugin(Star):
         return scopes.setdefault(str(scope_id), {"players": {}})
 
     def _new_player(self, user_id: str, name: str) -> Dict[str, Any]:
-        starter = "rin" if self._character_or_none("rin") else self._companions()[0]["id"]
         return {
             "user_id": user_id,
             "name": name,
-            "coins": 20,
+            "coins": 0,
             "tickets": 0,
             "last_checkin": "",
-            "current_npc": starter,
-            "npcs": {starter: {"exp": 0, "owned_at": datetime.now().strftime("%Y-%m-%d")}},
+            "last_mining": "",
+            "current_npc": "",
+            "npcs": {},
             "skins": {},
             "items": {},
             "exclusive_items": {},
@@ -1603,8 +1837,8 @@ class JubenNpcPlugin(Star):
             # New accounts receive a starter companion.  Administrators may
             # later remove even that last asset; this marker prevents the
             # migration routine from silently granting it back.
-            "allow_empty_npcs": False,
-            "draw_state": {"pity_count": 0, "next_pity_kind": "random"},
+            "allow_empty_npcs": True,
+            "draw_state": {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": "companion"},
         }
 
     def _get_player(self, event: AstrMessageEvent) -> Dict[str, Any]:
@@ -1644,8 +1878,9 @@ class JubenNpcPlugin(Star):
         player.setdefault("items", {})
         player.setdefault("exclusive_items", {})
         player.setdefault("current_skin", "")
+        player.setdefault("last_mining", "")
         player.setdefault("allow_empty_npcs", False)
-        player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random"})
+        player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": "companion"})
         self._migrate_player_npcs(player)
         if not player["npcs"] and not player.get("allow_empty_npcs"):
             starter = "rin" if self._character_or_none("rin") else self._companions()[0]["id"]
@@ -1769,6 +2004,8 @@ class JubenNpcPlugin(Star):
         draw_state["pity_count"] = max(0, min(DRAW_PITY_TARGET, int(draw_state.get("pity_count", 0) or 0)))
         if draw_state.get("next_pity_kind") not in {"random", COMPANION_KIND, SKIN_KIND}:
             draw_state["next_pity_kind"] = "random"
+        if draw_state.get("guarantee_stage") not in {COMPANION_KIND, SKIN_KIND, "complete"}:
+            draw_state["guarantee_stage"] = COMPANION_KIND
 
     def _character(self, character_id: str) -> Dict[str, Any]:
         companion = self._character_or_none(character_id)
@@ -1867,6 +2104,8 @@ class JubenNpcPlugin(Star):
         if entry["id"] in player["npcs"]:
             return False
         player["npcs"][entry["id"]] = {"exp": 0, "owned_at": now, "full_at": ""}
+        if not player.get("current_npc"):
+            player["current_npc"] = entry["id"]
         player["allow_empty_npcs"] = False
         return True
 
@@ -2001,7 +2240,7 @@ class JubenNpcPlugin(Star):
             "切换同伴", "切换角色", "更换角色", "选择角色", "NPC信息", "npc信息", "查询NPC",
             "角色信息", "每日打卡", "我的星币", "NPC仓库", "npc仓库", "我的NPC",
             "状态栏", "角色状态", "抽奖", "npc抽奖", "NPC抽奖", "星币", "钱包",
-            "中奖号码", "开奖", "打卡", "查NPC", "同伴栏", "物品栏", "道具栏", "我的道具", "道具仓库", "使用道具", "使用",
+            "中奖号码", "开奖", "每日挖矿", "挖矿领取", "挖矿", "打卡", "查NPC", "同伴栏", "物品栏", "道具栏", "我的道具", "道具仓库", "使用道具", "使用",
         ]
         for prefix in sorted(command_prefixes, key=len, reverse=True):
             if text.startswith(prefix):
@@ -2130,6 +2369,9 @@ class JubenNpcPlugin(Star):
             gaps.append("道具")
         return gaps
 
+    def _mining_pool(self) -> List[Dict[str, Any]]:
+        return [entry for entry in self._items() if self._template_bool(entry.get("mining_pool", False))]
+
     def _enforce_single_featured_pool(self, saved_entry: Dict[str, Any]) -> None:
         """Keep one active companion and one active skin in the current pool.
 
@@ -2225,46 +2467,41 @@ class JubenNpcPlugin(Star):
         }
 
     def _roll_draw(self, player: Dict[str, Any]) -> Dict[str, Any]:
-        """Roll one result using the customer's listed rates plus a transparent 10% no-drop slot.
+        """Resolve a fully-paid draw with no empty result slots.
 
-        The listed rates total 90%.  The final 10% intentionally gives no inventory item while still
-        advancing the displayed guarantee bar; it is not silently reassigned to another reward type.
+        A player's first draw guarantees a companion.  The next draw after
+        receiving that companion guarantees a skin.  Afterwards every draw
+        uses the 86/13/0.5/0.5 table, whose total is exactly 100 percent.
         """
         current_id = str(player.get("current_npc") or "")
         if not current_id:
             companions = self._companions()
             current_id = companions[0]["id"] if companions else ""
-        state = player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random"})
+        state = player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": COMPANION_KIND})
         state["pity_count"] = max(0, int(state.get("pity_count", 0) or 0)) + 1
 
         companion_pool = self._draw_pool(COMPANION_KIND)
         skin_pool = self._draw_pool(SKIN_KIND)
-        if state["pity_count"] >= DRAW_PITY_TARGET and (companion_pool or skin_pool):
-            requested = state.get("next_pity_kind", "random")
-            if requested == "random":
-                requested = random.choice([kind for kind, pool in ((COMPANION_KIND, companion_pool), (SKIN_KIND, skin_pool)) if pool])
-            pool = companion_pool if requested == COMPANION_KIND else skin_pool
-            if not pool:
-                requested = SKIN_KIND if requested == COMPANION_KIND else COMPANION_KIND
-                pool = skin_pool if requested == SKIN_KIND else companion_pool
-            entry = random.choice(pool)
+        stage = state.get("guarantee_stage", COMPANION_KIND)
+        if stage == COMPANION_KIND and companion_pool:
             state["pity_count"] = 0
-            state["next_pity_kind"] = SKIN_KIND if requested == COMPANION_KIND else COMPANION_KIND
-            return self._grant_draw_entry(player, entry, "保底同伴" if requested == COMPANION_KIND else "保底皮肤")
+            state["guarantee_stage"] = SKIN_KIND
+            return self._grant_draw_entry(player, random.choice(companion_pool), "首次同伴")
+        if stage == SKIN_KIND and skin_pool:
+            state["pity_count"] = 0
+            state["guarantee_stage"] = "complete"
+            return self._grant_draw_entry(player, random.choice(skin_pool), "首次皮肤")
 
         roll = random.random() * 100
         cursor = 0.0
-        # Keep the original 75% experience-ball bracket.  Custom balls change
-        # only which ball is selected inside that bracket, not the published
-        # odds of the other reward classes.
-        cursor += sum(rate for rate, _, _, _ in EXPERIENCE_BALLS)
+        cursor += DRAW_EXPERIENCE_RATE
         if roll < cursor:
             return self._roll_experience_ball(player, current_id)
 
         # The former normal/intermediate/advanced buckets total 13%.  Keep
         # that overall chance but choose from every checked item by its own
         # operator-configured weight.
-        cursor += 13
+        cursor += DRAW_ITEM_RATE
         if roll < cursor:
             pool = self._draw_pool(ITEM_KIND)
             if not pool:
@@ -2272,21 +2509,16 @@ class JubenNpcPlugin(Star):
             weights = [max(1, int(entry.get("draw_weight", 10) or 10)) for entry in pool]
             return self._grant_draw_entry(player, random.choices(pool, weights=weights, k=1)[0], "道具")
 
-        cursor += 0.8
+        cursor += DRAW_COMPANION_RATE
         if roll < cursor:
             if companion_pool:
                 state["pity_count"] = 0
                 return self._grant_draw_entry(player, random.choice(companion_pool), "同伴")
-            return {"kind": "同伴池为空", "name": "未配置同伴", "exp": 0, "character_id": current_id, "entry_kind": COMPANION_KIND}
 
-        cursor += 1.2
-        if roll < cursor:
-            if skin_pool:
-                state["pity_count"] = 0
-                return self._grant_draw_entry(player, random.choice(skin_pool), "皮肤")
-            return {"kind": "皮肤池为空", "name": "未配置皮肤", "exp": 0, "character_id": current_id, "entry_kind": SKIN_KIND}
-
-        return {"kind": "未命中", "name": "保底进度 +1", "exp": 0, "character_id": current_id, "entry_kind": "none"}
+        # The preceding branches cover 99.5%; the final branch (including any
+        # float roundoff at exactly 100) always resolves to a skin.
+        state["pity_count"] = 0
+        return self._grant_draw_entry(player, random.choice(skin_pool), "皮肤")
 
     def _slug(self, value: str) -> str:
         value = value.strip().lower()
@@ -2476,13 +2708,11 @@ class JubenNpcPlugin(Star):
             "simhei": [Path("C:/Windows/Fonts/simhei.ttf"), Path("C:/Windows/Fonts/msyhbd.ttc")],
             "simsun": [Path("C:/Windows/Fonts/simsun.ttc"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
             "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
-            "youyuan": [Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/msyhbd.ttc")],
-            "xingkai": [Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
             # Cute presets prefer Chinese-capable faces first.  Optional
             # operator-supplied files in data/fonts can make the same preset
             # even more decorative without changing code.
-            "cute": [self.font_dir / "CuteRounded-Bold.ttf", self.font_dir / "CuteRounded.ttf", Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
-            "comic": [self.font_dir / "ComicCute-Bold.ttf", self.font_dir / "ComicCute.ttf", Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf"), Path("C:/Windows/Fonts/comicbd.ttf")],
+            "cute": [self.font_dir / "CuteRounded-Bold.ttf", self.font_dir / "CuteRounded.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
+            "comic": [self.font_dir / "ComicCute-Bold.ttf", self.font_dir / "ComicCute.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
         }
         family_regular = {
             "msyh": [Path("C:/Windows/Fonts/msyh.ttc"), Path("C:/Windows/Fonts/msyhbd.ttc")],
@@ -2491,10 +2721,8 @@ class JubenNpcPlugin(Star):
             "simhei": [Path("C:/Windows/Fonts/simhei.ttf"), Path("C:/Windows/Fonts/msyhbd.ttc")],
             "simsun": [Path("C:/Windows/Fonts/simsun.ttc"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
             "kaiti": [Path("C:/Windows/Fonts/simkai.ttf")],
-            "youyuan": [Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/msyh.ttc")],
-            "xingkai": [Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
-            "cute": [self.font_dir / "CuteRounded.ttf", self.font_dir / "CuteRounded-Bold.ttf", Path("C:/Windows/Fonts/youyuan.ttf"), Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
-            "comic": [self.font_dir / "ComicCute.ttf", self.font_dir / "ComicCute-Bold.ttf", Path("C:/Windows/Fonts/STXINGKA.TTF"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf"), Path("C:/Windows/Fonts/comic.ttf")],
+            "cute": [self.font_dir / "CuteRounded.ttf", self.font_dir / "CuteRounded-Bold.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
+            "comic": [self.font_dir / "ComicCute.ttf", self.font_dir / "ComicCute-Bold.ttf", Path("C:/Windows/Fonts/simkai.ttf"), Path("C:/Windows/Fonts/NotoSerifSC-VF.ttf")],
         }
         system_bold = [
             Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
@@ -2664,6 +2892,22 @@ class JubenNpcPlugin(Star):
         img.save(path)
         return path
 
+    def _render_compact_notice_card(self, title: str, lines: List[str]) -> Path:
+        """A small, polished receipt for routine operator actions."""
+        path = self.render_dir / f"compact_{datetime.now().timestamp()}.png"
+        img = self._gradient((620, 270), "#1b3148", "#47747a").convert("RGBA")
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle((18, 18, 602, 252), radius=22, fill=(255, 255, 255, 238))
+        draw.ellipse((52, 52, 104, 104), fill="#f4c95d")
+        draw.text((66, 58), "★", font=self._font(30, True), fill="white")
+        draw.text((126, 54), title, font=self._font(34, True), fill="#17304b")
+        y = 116
+        for line in lines[:3]:
+            draw.text((66, y), line, font=self._font(20), fill="#50647b")
+            y += 34
+        img.save(path)
+        return path
+
     def _render_notice_card(self, title: str, message: str) -> Path:
         """A compact, stable tip card for errors and short confirmations."""
         path = self.render_dir / f"notice_{datetime.now().timestamp()}.png"
@@ -2703,6 +2947,20 @@ class JubenNpcPlugin(Star):
             if matches:
                 return sorted(matches, key=lambda item: (-int(item.get("priority", 0) or 0), str(item.get("id") or "")))[0]
         return sorted(candidates, key=lambda item: (-int(item.get("priority", 0) or 0), str(item.get("id") or "")))[0]
+
+    def _mining_template_for(self, player: Dict[str, Any], companion_id: str) -> Dict[str, Any]:
+        return self._select_role_template(
+            self.mining_templates,
+            player,
+            companion_id,
+            self._default_mining_template(),
+        )
+
+    @staticmethod
+    def _pick_template_background(template: Dict[str, Any]) -> str:
+        images = template.get("background_images") if isinstance(template.get("background_images"), list) else []
+        candidates = [Path(str(item)).name for item in images if str(item).strip()]
+        return random.choice(candidates) if candidates else ""
 
     def _checkin_template_for(self, player: Dict[str, Any]) -> Dict[str, Any]:
         companion = self._character_or_none(str(player.get("current_npc") or ""))
@@ -2805,6 +3063,37 @@ class JubenNpcPlugin(Star):
         }
         img = self._compose_checkin_image(template, values)
         path = self.render_dir / f"checkin_{player['user_id']}_{datetime.now().timestamp()}.png"
+        img.save(path)
+        return path
+
+    def _render_mining(
+        self,
+        player: Dict[str, Any],
+        companion: Dict[str, Any],
+        item: Dict[str, Any],
+        template: Dict[str, Any],
+    ) -> Path:
+        """Render one daily mining reward using a role-bound background."""
+        size = (1280, 720)
+        background_name = self._pick_template_background(template)
+        background_path = self.mining_assets_dir / background_name
+        if background_name and background_path.exists():
+            img = self._cover_image(background_path, size)
+        else:
+            img = self._gradient(size, companion["colors"][2], companion["colors"][0]).convert("RGBA")
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle((56, 54, 502, 320), radius=22, fill=(11, 24, 43, 210))
+        draw.text((88, 84), "挖矿收获", font=self._font(46, True), fill="white")
+        draw.text((90, 148), f"同伴：{companion['name']}", font=self._font(23), fill="#dcecff")
+        thumbnail = self._asset_thumbnail(str(item.get("image") or ""), (118, 118))
+        if thumbnail:
+            img.alpha_composite(thumbnail, (88, 180))
+        else:
+            draw.rounded_rectangle((88, 180, 206, 298), radius=16, fill="#edf3f7")
+        draw.text((230, 190), item["name"], font=self._font(32, True), fill="white")
+        draw.text((232, 240), item.get("effect") or "获得一件探索道具", font=self._font(19), fill="#dcecff")
+        draw.text((88, 650), f"探索者：{player.get('name') or player.get('user_id')}", font=self._font(20), fill=(255, 255, 255, 220))
+        path = self.render_dir / f"mining_{player['user_id']}_{datetime.now().timestamp()}.png"
         img.save(path)
         return path
 
@@ -3176,32 +3465,37 @@ class JubenNpcPlugin(Star):
 
     def _render_draw(self, player: Dict[str, Any], results: List[Dict[str, Any]], coin_cost: int, ticket_used: int) -> Path:
         path = self.render_dir / f"draw_{player['user_id']}.png"
-        img = self._gradient((1180, 760), "#231942", "#4d908e").convert("RGBA")
+        size = (1180, 760)
+        background_name = str(self.draw_design.get("background_image") or "")
+        background_path = self.draw_assets_dir / Path(background_name).name
+        if background_name and background_path.exists():
+            img = self._cover_image(background_path, size)
+        else:
+            img = self._gradient(size, "#231942", "#4d908e").convert("RGBA")
         draw = ImageDraw.Draw(img)
+        result_border = self._template_color(self.draw_design.get("result_border_color"), "#e9f3ff")
+        pity_border = self._template_color(self.draw_design.get("pity_border_color"), "#b8d5f1")
         draw.text((60, 45), "抽奖结果", font=self._font(56, True), fill="white")
-        draw.text((62, 112), f"消耗：{coin_cost} 星币 / 固定 {DRAW_COUNT} 抽    余额：{player['coins']} 星币", font=self._font(24), fill="#eaf2ff")
+        drawer = str(player.get("name") or player.get("user_id") or "玩家")[:20]
+        draw.text((62, 112), f"抽奖人：{drawer}    消耗：{coin_cost} 星币 / 固定 {DRAW_COUNT} 抽    余额：{player['coins']} 星币", font=self._font(22), fill="#eaf2ff")
 
         state = player.get("draw_state", {})
         pity_count = max(0, min(DRAW_PITY_TARGET, int(state.get("pity_count", 0) or 0)))
         percentage = pity_count / DRAW_PITY_TARGET
-        draw.rounded_rectangle((795, 42, 1125, 150), radius=18, fill=(255, 255, 255, 230))
-        draw.text((824, 61), "抽奖进度条", font=self._font(26, True), fill="#172033")
+        draw.rounded_rectangle((795, 42, 1125, 150), radius=18, fill=(255, 255, 255, 236), outline=pity_border, width=4)
+        draw.text((824, 61), "保底进度", font=self._font(26, True), fill="#172033")
         draw.rounded_rectangle((824, 102, 1095, 124), radius=11, fill="#dbe2ef")
         if percentage:
             draw.rounded_rectangle((824, 102, 824 + int(271 * percentage), 124), radius=11, fill="#7d9fc2")
         draw.text((1010, 62), f"{percentage * 100:.0f}%", font=self._font(22, True), fill="#567da7")
+        guarantee = state.get("guarantee_stage", "complete")
+        guarantee_text = "下次必出同伴" if guarantee == COMPANION_KIND else ("下次必出皮肤" if guarantee == SKIN_KIND else "保底已完成")
+        draw.text((824, 130), guarantee_text, font=self._font(16), fill="#657086")
 
-        companion_pool = self._draw_pool(COMPANION_KIND)
-        skin_pool = self._draw_pool(SKIN_KIND)
-        drawn_companion = next((self._character_or_none(result.get("entry_id", "")) for result in results if result.get("entry_kind") == COMPANION_KIND), None)
-        drawn_skin = next((self._character_or_none(result.get("entry_id", "")) for result in results if result.get("entry_kind") == SKIN_KIND), None)
-        display_companion = drawn_companion or (companion_pool[0] if companion_pool else None)
-        display_skin = drawn_skin or (skin_pool[0] if skin_pool else None)
-
-        y = 182
+        y = 178
         for index, result in enumerate(results, start=1):
             current = self._character(result["character_id"])
-            draw.rounded_rectangle((60, y, 700, y + 82), radius=16, fill=(255, 255, 255, 232))
+            draw.rounded_rectangle((60, y, 1120, y + 88), radius=16, fill=(255, 255, 255, 236), outline=result_border, width=3)
             thumbnail = self._asset_thumbnail(str(result.get("image") or ""), (67, 44))
             if thumbnail:
                 img.alpha_composite(thumbnail, (78, y + 18))
@@ -3212,20 +3506,6 @@ class JubenNpcPlugin(Star):
             draw.text((168, y + 13), result["name"], font=self._font(25, True), fill="#172033")
             detail = result["kind"] if result["exp"] == 0 else f"{result['kind']} → {current['name']} +{result['exp']} EXP"
             draw.text((168, y + 47), detail, font=self._font(18), fill="#526071")
-            y += 97
-
-        def draw_pool_preview(entry: Optional[Dict[str, Any]], label: str, y0: int):
-            draw.rounded_rectangle((745, y0, 1125, y0 + 252), radius=18, fill=(255, 255, 255, 226))
-            draw.text((770, y0 + 16), label, font=self._font(23, True), fill="#172033")
-            if not entry:
-                draw.text((770, y0 + 110), "后台尚未勾选奖池内容", font=self._font(20), fill="#657086")
-                return
-            img.alpha_composite(self._portrait(entry, (148, 174)), (958, y0 + 58))
-            draw.text((770, y0 + 66), entry["name"], font=self._font(27, True), fill="#172033")
-            draw.text((770, y0 + 108), f"{entry.get('english_name') or entry['name']} | {entry.get('quality', entry.get('star', 'R'))}", font=self._font(18), fill="#6d9bc6")
-            draw.text((770, y0 + 150), "已加入本期奖池", font=self._font(18), fill="#526071")
-
-        draw_pool_preview(display_companion, "当前同伴奖池", 178)
-        draw_pool_preview(display_skin, "当前皮肤奖池", 454)
+            y += 102
         img.save(path)
         return path
