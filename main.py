@@ -169,7 +169,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     },
 ]
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡、挖矿与抽奖插件", "2.5.0")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡、挖矿与抽奖插件", "2.5.1")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -1140,7 +1140,7 @@ class JubenNpcPlugin(Star):
                 player.setdefault("allow_empty_npcs", False)
                 player.setdefault(
                     "draw_state",
-                    {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": "companion"},
+                    {"pity_count": 0, "next_pity_kind": "random", "starter_pending": not bool(player.get("npcs"))},
                 )
                 for value in player.get("npcs", {}).values():
                     if isinstance(value, dict):
@@ -1210,6 +1210,7 @@ class JubenNpcPlugin(Star):
             "name": "同伴打卡样式",
             "bound_entry_id": "",
             "priority": 0,
+            "folder": "默认",
             "background_image": "",
             # Keep the legacy field so existing WebUI clients and old JSON keep
             # resolving their background after the schema upgrade.
@@ -1238,6 +1239,7 @@ class JubenNpcPlugin(Star):
             "name": "默认状态栏样式",
             "bound_entry_id": "",
             "priority": 0,
+            "folder": "默认",
             "background_image": "",
             "image": "",
             "enabled": True,
@@ -1270,8 +1272,8 @@ class JubenNpcPlugin(Star):
     def _default_draw_design() -> Dict[str, Any]:
         return {
             "background_image": "",
-            "result_border_color": "#e9f3ff",
-            "pity_border_color": "#b8d5f1",
+            "result_card_color": "#ffffff",
+            "pity_card_color": "#ffffff",
         }
 
     @staticmethod
@@ -1281,6 +1283,7 @@ class JubenNpcPlugin(Star):
             "name": "通用挖矿样式",
             "bound_entry_id": "",
             "priority": 0,
+            "folder": "默认",
             "enabled": True,
             "background_images": [],
         }
@@ -1376,6 +1379,7 @@ class JubenNpcPlugin(Star):
             base["priority"] = max(-100, min(100, int(data.get("priority", 0) or 0)))
         except (TypeError, ValueError):
             base["priority"] = 0
+        base["folder"] = str(data.get("folder") or base["folder"]).strip()[:30] or "默认"
         base["enabled"] = self._template_bool(data.get("enabled", True))
         images = data.get("background_images", data.get("background_image", []))
         if isinstance(images, str):
@@ -1387,8 +1391,12 @@ class JubenNpcPlugin(Star):
         base = self._default_draw_design()
         background = Path(str(data.get("background_image") or "")).name
         base["background_image"] = background
-        for key in ("result_border_color", "pity_border_color"):
-            value = str(data.get(key) or base[key])
+        legacy_keys = {
+            "result_card_color": "result_border_color",
+            "pity_card_color": "pity_border_color",
+        }
+        for key, legacy_key in legacy_keys.items():
+            value = str(data.get(key) or data.get(legacy_key) or base[key])
             base[key] = value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else base[key]
         return base
 
@@ -1419,6 +1427,7 @@ class JubenNpcPlugin(Star):
             base["priority"] = max(-100, min(100, int(data.get("priority", base.get("priority", 0)) or 0)))
         except (TypeError, ValueError):
             base["priority"] = int(base.get("priority", 0) or 0)
+        base["folder"] = str(data.get("folder") or base.get("folder") or "默认").strip()[:30] or "默认"
         base["enabled"] = bool(data.get("enabled", True))
         family = str(data.get("font_family") or base.get("font_family") or "default").strip().lower()
         base["font_family"] = family if family in FONT_FAMILIES else "default"
@@ -1590,6 +1599,7 @@ class JubenNpcPlugin(Star):
         if not isinstance(colors, list) or len(colors) < 3:
             colors = ["#6c8cff", "#f4d35e", "#10172a"]
         image = Path(str(data.get("image") or f"{character_id}.png").strip()).name
+        folder = str(data.get("folder") or "默认").strip()[:30] or "默认"
         raw_skills = data.get("skills")
         profile_skills: List[List[str]] = []
         if isinstance(raw_skills, (list, tuple)):
@@ -1611,6 +1621,7 @@ class JubenNpcPlugin(Star):
                 "name": name,
                 "english_name": str(data.get("english_name") or "").strip(),
                 "quality": str(data.get("quality") or "经验球").strip()[:20] or "经验球",
+                "folder": folder,
                 "exp_amount": int(self._template_number(data.get("exp_amount"), 10, 1, 999999)),
                 "draw_weight": int(self._template_number(data.get("draw_weight"), 10, 1, 1000)),
                 "image": image,
@@ -1627,6 +1638,7 @@ class JubenNpcPlugin(Star):
                 "name": name,
                 "english_name": str(data.get("english_name") or "").strip(),
                 "quality": quality,
+                "folder": folder,
                 # Quality is now display-only.  All checked items share one
                 # draw pool and use this explicit relative weight instead.
                 "draw_weight": int(self._template_number(data.get("draw_weight"), 10, 1, 1000)),
@@ -1650,6 +1662,7 @@ class JubenNpcPlugin(Star):
                 "name": name,
                 "english_name": english_name or name,
                 "quality": quality,
+                "folder": folder,
                 "star": quality,
                 "skin": english_name or name,
                 # Skins may override the status-card bonus and skill copy.
@@ -1680,6 +1693,7 @@ class JubenNpcPlugin(Star):
             "english_name": english_name,
             "skin": english_name,
             "quality": quality,
+            "folder": folder,
             "star": quality,
             "route": str(data.get("route") or "运营后台添加").strip(),
             "bonus": str(data.get("bonus") or "通用经验 +5%").strip(),
@@ -1838,7 +1852,7 @@ class JubenNpcPlugin(Star):
             # later remove even that last asset; this marker prevents the
             # migration routine from silently granting it back.
             "allow_empty_npcs": True,
-            "draw_state": {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": "companion"},
+            "draw_state": {"pity_count": 0, "next_pity_kind": "random", "starter_pending": True, "starter_skin_pending": False},
         }
 
     def _get_player(self, event: AstrMessageEvent) -> Dict[str, Any]:
@@ -1880,7 +1894,7 @@ class JubenNpcPlugin(Star):
         player.setdefault("current_skin", "")
         player.setdefault("last_mining", "")
         player.setdefault("allow_empty_npcs", False)
-        player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": "companion"})
+        player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random", "starter_pending": not bool(player.get("npcs"))})
         self._migrate_player_npcs(player)
         if not player["npcs"] and not player.get("allow_empty_npcs"):
             starter = "rin" if self._character_or_none("rin") else self._companions()[0]["id"]
@@ -2004,8 +2018,16 @@ class JubenNpcPlugin(Star):
         draw_state["pity_count"] = max(0, min(DRAW_PITY_TARGET, int(draw_state.get("pity_count", 0) or 0)))
         if draw_state.get("next_pity_kind") not in {"random", COMPANION_KIND, SKIN_KIND}:
             draw_state["next_pity_kind"] = "random"
-        if draw_state.get("guarantee_stage") not in {COMPANION_KIND, SKIN_KIND, "complete"}:
-            draw_state["guarantee_stage"] = COMPANION_KIND
+        # A previous release used ``guarantee_stage`` for every account, so
+        # any player who already owned a companion was guaranteed a companion
+        # and skin at the start of the next draw.  The opening guide belongs
+        # only to an account with no companion at all.
+        has_companion = bool(player.get("npcs"))
+        draw_state["starter_pending"] = not has_companion
+        draw_state["starter_skin_pending"] = bool(
+            draw_state.get("starter_skin_pending", False) and has_companion
+        )
+        draw_state.pop("guarantee_stage", None)
 
     def _character(self, character_id: str) -> Dict[str, Any]:
         companion = self._character_or_none(character_id)
@@ -2469,28 +2491,46 @@ class JubenNpcPlugin(Star):
     def _roll_draw(self, player: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve a fully-paid draw with no empty result slots.
 
-        A player's first draw guarantees a companion.  The next draw after
-        receiving that companion guarantees a skin.  Afterwards every draw
-        uses the 86/13/0.5/0.5 table, whose total is exactly 100 percent.
+        Only accounts without a companion receive the opening companion/skin
+        guide.  Established players always use the public 86/13/0.5/0.5
+        table, plus the 100-draw guarantee against the *current* pool.
         """
         current_id = str(player.get("current_npc") or "")
         if not current_id:
             companions = self._companions()
             current_id = companions[0]["id"] if companions else ""
-        state = player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": COMPANION_KIND})
+        state = player.setdefault(
+            "draw_state",
+            {"pity_count": 0, "next_pity_kind": "random", "starter_pending": not bool(player.get("npcs"))},
+        )
         state["pity_count"] = max(0, int(state.get("pity_count", 0) or 0)) + 1
 
         companion_pool = self._draw_pool(COMPANION_KIND)
         skin_pool = self._draw_pool(SKIN_KIND)
-        stage = state.get("guarantee_stage", COMPANION_KIND)
-        if stage == COMPANION_KIND and companion_pool:
+        if not player.get("npcs") and companion_pool:
             state["pity_count"] = 0
-            state["guarantee_stage"] = SKIN_KIND
+            state["starter_pending"] = False
+            state["starter_skin_pending"] = bool(skin_pool)
             return self._grant_draw_entry(player, random.choice(companion_pool), "首次同伴")
-        if stage == SKIN_KIND and skin_pool:
+        if state.get("starter_skin_pending") and skin_pool:
             state["pity_count"] = 0
-            state["guarantee_stage"] = "complete"
+            state["starter_skin_pending"] = False
             return self._grant_draw_entry(player, random.choice(skin_pool), "首次皮肤")
+
+        if state["pity_count"] >= DRAW_PITY_TARGET and (companion_pool or skin_pool):
+            requested = state.get("next_pity_kind", "random")
+            if requested == "random":
+                requested = random.choice(
+                    [kind for kind, pool in ((COMPANION_KIND, companion_pool), (SKIN_KIND, skin_pool)) if pool]
+                )
+            pool = companion_pool if requested == COMPANION_KIND else skin_pool
+            if not pool:
+                requested = SKIN_KIND if requested == COMPANION_KIND else COMPANION_KIND
+                pool = skin_pool if requested == SKIN_KIND else companion_pool
+            state["pity_count"] = 0
+            state["next_pity_kind"] = SKIN_KIND if requested == COMPANION_KIND else COMPANION_KIND
+            label = "保底同伴" if requested == COMPANION_KIND else "保底皮肤"
+            return self._grant_draw_entry(player, random.choice(pool), label)
 
         roll = random.random() * 100
         cursor = 0.0
@@ -2513,11 +2553,13 @@ class JubenNpcPlugin(Star):
         if roll < cursor:
             if companion_pool:
                 state["pity_count"] = 0
+                state["next_pity_kind"] = SKIN_KIND
                 return self._grant_draw_entry(player, random.choice(companion_pool), "同伴")
 
         # The preceding branches cover 99.5%; the final branch (including any
         # float roundoff at exactly 100) always resolves to a skin.
         state["pity_count"] = 0
+        state["next_pity_kind"] = COMPANION_KIND
         return self._grant_draw_entry(player, random.choice(skin_pool), "皮肤")
 
     def _slug(self, value: str) -> str:
@@ -3082,9 +3124,6 @@ class JubenNpcPlugin(Star):
         else:
             img = self._gradient(size, companion["colors"][2], companion["colors"][0]).convert("RGBA")
         draw = ImageDraw.Draw(img)
-        draw.rounded_rectangle((56, 54, 502, 320), radius=22, fill=(11, 24, 43, 210))
-        draw.text((88, 84), "挖矿收获", font=self._font(46, True), fill="white")
-        draw.text((90, 148), f"同伴：{companion['name']}", font=self._font(23), fill="#dcecff")
         thumbnail = self._asset_thumbnail(str(item.get("image") or ""), (118, 118))
         if thumbnail:
             img.alpha_composite(thumbnail, (88, 180))
@@ -3092,7 +3131,6 @@ class JubenNpcPlugin(Star):
             draw.rounded_rectangle((88, 180, 206, 298), radius=16, fill="#edf3f7")
         draw.text((230, 190), item["name"], font=self._font(32, True), fill="white")
         draw.text((232, 240), item.get("effect") or "获得一件探索道具", font=self._font(19), fill="#dcecff")
-        draw.text((88, 650), f"探索者：{player.get('name') or player.get('user_id')}", font=self._font(20), fill=(255, 255, 255, 220))
         path = self.render_dir / f"mining_{player['user_id']}_{datetime.now().timestamp()}.png"
         img.save(path)
         return path
@@ -3377,14 +3415,14 @@ class JubenNpcPlugin(Star):
             y += row_height + 5
 
             for skin in owned_skins:
-                # Align with the parent card rather than placing the skin in a
-                # deeply indented second column; this is compact and still
-                # visibly nested by its smaller height and "皮肤" label.
-                draw.rounded_rectangle((52, y, 1228, y + 57), radius=12, fill=(255, 255, 255, 225), outline=border_color, width=1)
+                # A small offset makes it immediately clear that this is a
+                # companion attachment, without wasting the card's width.
+                skin_x = 82
+                draw.rounded_rectangle((skin_x, y, 1228, y + 57), radius=12, fill=(255, 255, 255, 225), outline=border_color, width=1)
                 portrait = self._portrait(skin, (108, 49))
-                img.alpha_composite(portrait, (61, y + 4))
-                draw.text((184, y + 8), f"皮肤：{skin['name']}", font=self._font(21, True), fill=title_color)
-                draw.text((184, y + 34), f"{skin.get('english_name') or skin['name']}  |  {skin.get('quality', skin.get('star', 'R'))}", font=self._font(16), fill=meta_color)
+                img.alpha_composite(portrait, (skin_x + 9, y + 4))
+                draw.text((skin_x + 132, y + 8), f"皮肤：{skin['name']}", font=self._font(21, True), fill=title_color)
+                draw.text((skin_x + 132, y + 34), f"{skin.get('english_name') or skin['name']}  |  {skin.get('quality', skin.get('star', 'R'))}", font=self._font(16), fill=meta_color)
                 if skin["id"] == player.get("current_skin"):
                     draw.rounded_rectangle((1119, y + 13, 1208, y + 43), radius=10, fill=companion["colors"][0])
                     draw.text((1134, y + 16), "已装备", font=self._font(14, True), fill="white")
@@ -3473,8 +3511,8 @@ class JubenNpcPlugin(Star):
         else:
             img = self._gradient(size, "#231942", "#4d908e").convert("RGBA")
         draw = ImageDraw.Draw(img)
-        result_border = self._template_color(self.draw_design.get("result_border_color"), "#e9f3ff")
-        pity_border = self._template_color(self.draw_design.get("pity_border_color"), "#b8d5f1")
+        result_fill = self._template_color(self.draw_design.get("result_card_color"), "#ffffff")
+        pity_fill = self._template_color(self.draw_design.get("pity_card_color"), "#ffffff")
         draw.text((60, 45), "抽奖结果", font=self._font(56, True), fill="white")
         drawer = str(player.get("name") or player.get("user_id") or "玩家")[:20]
         draw.text((62, 112), f"抽奖人：{drawer}    消耗：{coin_cost} 星币 / 固定 {DRAW_COUNT} 抽    余额：{player['coins']} 星币", font=self._font(22), fill="#eaf2ff")
@@ -3482,20 +3520,23 @@ class JubenNpcPlugin(Star):
         state = player.get("draw_state", {})
         pity_count = max(0, min(DRAW_PITY_TARGET, int(state.get("pity_count", 0) or 0)))
         percentage = pity_count / DRAW_PITY_TARGET
-        draw.rounded_rectangle((795, 42, 1125, 150), radius=18, fill=(255, 255, 255, 236), outline=pity_border, width=4)
+        draw.rounded_rectangle((795, 42, 1125, 150), radius=18, fill=pity_fill, outline=(255, 255, 255, 150), width=2)
         draw.text((824, 61), "保底进度", font=self._font(26, True), fill="#172033")
         draw.rounded_rectangle((824, 102, 1095, 124), radius=11, fill="#dbe2ef")
         if percentage:
             draw.rounded_rectangle((824, 102, 824 + int(271 * percentage), 124), radius=11, fill="#7d9fc2")
         draw.text((1010, 62), f"{percentage * 100:.0f}%", font=self._font(22, True), fill="#567da7")
-        guarantee = state.get("guarantee_stage", "complete")
-        guarantee_text = "下次必出同伴" if guarantee == COMPANION_KIND else ("下次必出皮肤" if guarantee == SKIN_KIND else "保底已完成")
+        next_pity_kind = state.get("next_pity_kind", "random")
+        guarantee_text = "满 100 抽必得同伴或皮肤" if next_pity_kind == "random" else f"下次保底优先{('同伴' if next_pity_kind == COMPANION_KIND else '皮肤')}"
         draw.text((824, 130), guarantee_text, font=self._font(16), fill="#657086")
 
         y = 178
         for index, result in enumerate(results, start=1):
             current = self._character(result["character_id"])
-            draw.rounded_rectangle((60, y, 1120, y + 88), radius=16, fill=(255, 255, 255, 236), outline=result_border, width=3)
+            # Keep the former pool area empty so the operator can compose it
+            # directly into the uploaded background without result cards
+            # covering it.
+            draw.rounded_rectangle((60, y, 735, y + 88), radius=16, fill=result_fill, outline=(255, 255, 255, 150), width=2)
             thumbnail = self._asset_thumbnail(str(result.get("image") or ""), (67, 44))
             if thumbnail:
                 img.alpha_composite(thumbnail, (78, y + 18))

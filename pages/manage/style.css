@@ -88,11 +88,13 @@ textarea { resize: vertical; }
 .template-layout { padding: 16px; }
 .template-form { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0; }
 .template-help { color: #607086; font-size: 13px; line-height: 1.6; }
-.text-table-head, .text-row { align-items: center; display: grid; gap: 8px; grid-template-columns: 120px minmax(0, 1fr) repeat(3, 50px) 112px 52px 64px 60px 30px; }
+.text-table-head, .text-row { align-items: center; display: grid; gap: 8px; grid-template-columns: 108px minmax(150px, 1fr) repeat(3, 66px) 52px 64px 60px 30px; }
 .text-table-head { color: #607086; font-size: 12px; }
 .text-row { margin: 7px 0; min-width: 0; }
 .text-row input { min-width: 0; }
 .text-row input[type="color"] { min-height: 36px; padding: 3px; }
+.font-control { align-items: center; display: grid; gap: 6px; grid-column: 1 / -1; grid-template-columns: 42px minmax(180px, 320px); }
+.font-control select { min-width: 0; }
 .bold-control, .shadow-control { align-items: center; color: #526071; display: flex; font-size: 12px; gap: 5px; }
 .remove-text { border-radius: 50%; height: 30px; line-height: 1; padding: 0; width: 30px; }
 .progress-controls { border: 1px solid #dce3ec; border-radius: 8px; display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 13px; }
@@ -112,6 +114,9 @@ textarea { resize: vertical; }
 .template-preview { aspect-ratio: 16 / 9; background: #edf2f7; border: 1px solid #dce3ec; border-radius: 8px; display: block; margin: 0 16px 16px; max-width: calc(100% - 32px); object-fit: cover; width: 720px; }
 .status-preview { aspect-ratio: 32 / 21; }
 .background-gallery { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.folder-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.folder-tabs button { background: #eef3f8; color: #526071; font-size: 12px; padding: 5px 8px; }
+.folder-tabs button.active { background: #2563eb; color: #fff; }
 .background-gallery:empty::before { color: #65758c; content: "尚未上传背景；可上传最多 6 张。"; font-size: 13px; }
 .background-card { background: #f8fafc; border: 1px solid #dce3ec; border-radius: 8px; overflow: hidden; position: relative; }
 .background-card img { aspect-ratio: 16 / 9; display: block; object-fit: cover; width: 100%; }
@@ -148,6 +153,7 @@ textarea { resize: vertical; }
   .text-table-head { display: none; }
   .text-row { grid-template-columns: 1fr 1fr 1fr; border: 1px solid #e0e7f0; border-radius: 8px; padding: 10px; }
   .text-row strong, .text-row input[data-field="text"] { grid-column: 1 / -1; }
+  .font-control { grid-template-columns: 42px minmax(0, 1fr); }
   .preview { grid-template-columns: 1fr; }
   .upload-row, .asset-actions { align-items: stretch; flex-direction: column; }
   .preview img { width: 100%; }

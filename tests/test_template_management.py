@@ -330,7 +330,7 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertEqual(player["current_npc"], "")
         self.assertTrue(player["allow_empty_npcs"])
 
-    def test_draw_guarantees_companion_then_skin_and_never_returns_empty(self):
+    def test_draw_opening_guide_only_applies_before_the_first_companion(self):
         instance = plugin_instance()
         companion = {"id": "companion", "kind": PLUGIN.COMPANION_KIND, "name": "同伴", "in_pool": True, "colors": ["#123456"]}
         skin = {"id": "skin", "kind": PLUGIN.SKIN_KIND, "name": "皮肤", "parent_id": "companion", "in_pool": True, "colors": ["#123456"]}
@@ -338,8 +338,8 @@ class TemplateManagementTests(unittest.TestCase):
         ball = {"id": "ball", "kind": PLUGIN.EXPERIENCE_BALL_KIND, "name": "经验球", "in_pool": True, "draw_weight": 1, "exp_amount": 10, "colors": ["#123456"]}
         instance.characters = [companion, skin, item, ball]
         player = {
-            "npcs": {}, "skins": {}, "items": {}, "current_npc": "companion",
-            "draw_state": {"pity_count": 0, "next_pity_kind": "random", "guarantee_stage": PLUGIN.COMPANION_KIND},
+            "npcs": {}, "skins": {}, "items": {}, "current_npc": "",
+            "draw_state": {"pity_count": 0, "next_pity_kind": "random", "starter_pending": True},
         }
 
         first = instance._roll_draw(player)
@@ -351,6 +351,45 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertEqual(second["entry_kind"], PLUGIN.SKIN_KIND)
         self.assertEqual(third["entry_kind"], PLUGIN.SKIN_KIND)
         self.assertNotEqual(third["kind"], "未命中")
+
+        established = {
+            "npcs": {"companion": {"exp": 0}}, "skins": {}, "items": {}, "current_npc": "companion",
+            "draw_state": {"pity_count": 0, "next_pity_kind": "random"},
+        }
+        with patch.object(PLUGIN.random, "random", return_value=0.01):
+            result = instance._roll_draw(established)
+        self.assertEqual(result["entry_kind"], PLUGIN.EXPERIENCE_BALL_KIND)
+
+    def test_pity_draw_uses_the_current_pool_and_resets_progress(self):
+        instance = plugin_instance()
+        companion = {"id": "new_companion", "kind": PLUGIN.COMPANION_KIND, "name": "新同伴", "in_pool": True, "colors": ["#123456"]}
+        skin = {"id": "new_skin", "kind": PLUGIN.SKIN_KIND, "name": "新皮肤", "parent_id": "new_companion", "in_pool": True, "colors": ["#123456"]}
+        item = {"id": "item", "kind": PLUGIN.ITEM_KIND, "name": "道具", "in_pool": True, "draw_weight": 1, "colors": ["#123456"]}
+        instance.characters = [companion, skin, item]
+        player = {
+            "npcs": {"new_companion": {"exp": 0}}, "skins": {}, "items": {}, "current_npc": "new_companion",
+            "draw_state": {"pity_count": PLUGIN.DRAW_PITY_TARGET - 1, "next_pity_kind": PLUGIN.SKIN_KIND},
+        }
+
+        result = instance._roll_draw(player)
+
+        self.assertEqual(result["entry_id"], "new_skin")
+        self.assertEqual(result["kind"], "保底皮肤")
+        self.assertEqual(player["draw_state"]["pity_count"], 0)
+        self.assertEqual(player["draw_state"]["next_pity_kind"], PLUGIN.COMPANION_KIND)
+
+    def test_legacy_opening_state_is_removed_for_players_with_companions(self):
+        instance = plugin_instance()
+        player = {
+            "npcs": {"linger": {"exp": 0}}, "skins": {}, "items": {}, "exclusive_items": {},
+            "draw_state": {"pity_count": 7, "next_pity_kind": "random", "guarantee_stage": PLUGIN.COMPANION_KIND},
+        }
+
+        instance._migrate_player_npcs(player)
+
+        self.assertNotIn("guarantee_stage", player["draw_state"])
+        self.assertFalse(player["draw_state"]["starter_pending"])
+        self.assertFalse(player["draw_state"]["starter_skin_pending"])
 
     def test_experience_ball_entries_are_weighted_inside_the_experience_slot(self):
         instance = plugin_instance()
@@ -400,11 +439,11 @@ class TemplateManagementTests(unittest.TestCase):
 
     def test_draw_design_and_compact_coin_receipt_render(self):
         instance = plugin_instance()
-        design = instance._normalize_draw_design({"background_image": "../draw.png", "result_border_color": "#123456", "pity_border_color": "invalid"})
+        design = instance._normalize_draw_design({"background_image": "../draw.png", "result_card_color": "#123456", "pity_card_color": "invalid"})
 
         self.assertEqual(design["background_image"], "draw.png")
-        self.assertEqual(design["result_border_color"], "#123456")
-        self.assertEqual(design["pity_border_color"], "#b8d5f1")
+        self.assertEqual(design["result_card_color"], "#123456")
+        self.assertEqual(design["pity_card_color"], "#ffffff")
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             instance.render_dir = directory
@@ -412,6 +451,33 @@ class TemplateManagementTests(unittest.TestCase):
             result = instance._render_compact_notice_card("星币已发放", ["对象：测试", "发放 +10 星币"])
             with Image.open(result) as image:
                 self.assertEqual(image.size, (620, 270))
+
+    def test_draw_and_mining_keep_background_composition_space_clear(self):
+        instance = plugin_instance()
+        companion = {"id": "linger", "kind": PLUGIN.COMPANION_KIND, "name": "灵儿", "colors": ["#325b86", "#dcecff", "#18243c"]}
+        item = {"id": "ore", "kind": PLUGIN.ITEM_KIND, "name": "矿石", "effect": "测试效果", "image": ""}
+        instance.characters = [companion, item]
+        player = {
+            "user_id": "1", "name": "测试", "coins": 10, "current_npc": "linger", "npcs": {"linger": {"exp": 0}},
+            "items": {}, "skins": {}, "draw_state": {"pity_count": 0, "next_pity_kind": "random"},
+        }
+        result = {"name": "矿石", "kind": "道具", "exp": 0, "character_id": "linger", "image": ""}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            instance.assets_dir = directory / "assets"; instance.assets_dir.mkdir()
+            instance.draw_assets_dir = directory / "draw"; instance.draw_assets_dir.mkdir()
+            instance.mining_assets_dir = directory / "mining"; instance.mining_assets_dir.mkdir()
+            instance.render_dir = directory / "rendered"; instance.render_dir.mkdir()
+            instance.font_dir = directory / "fonts"; instance.font_dir.mkdir()
+            Image.new("RGB", (1180, 760), "#123456").save(instance.draw_assets_dir / "draw.png")
+            Image.new("RGB", (1280, 720), "#456789").save(instance.mining_assets_dir / "mining.png")
+            instance.draw_design = {"background_image": "draw.png", "result_card_color": "#ffffff", "pity_card_color": "#ffffff"}
+            draw_path = instance._render_draw(player, [result] * 5, 10, 0)
+            mining_path = instance._render_mining(player, companion, item, {"background_images": ["mining.png"]})
+            with Image.open(draw_path) as image:
+                self.assertEqual(image.getpixel((850, 220))[:3], image.getpixel((850, 260))[:3])
+            with Image.open(mining_path) as image:
+                self.assertEqual(image.getpixel((60, 54))[:3], (69, 103, 137))
 
     def test_available_font_presets_have_real_font_files(self):
         instance = plugin_instance()

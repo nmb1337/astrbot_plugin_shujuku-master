@@ -50,6 +50,8 @@ let selectedCheckinId = '';
 let selectedStatusId = '';
 let selectedMiningId = '';
 let selectedFilter = 'all';
+let selectedLibraryFolder = 'all';
+const templateFolderFilters = { checkin: 'all', status: 'all', mining: 'all' };
 let activeImagePasteHandler = null;
 let checkinPreviewTimer = 0;
 let statusPreviewTimer = 0;
@@ -190,6 +192,16 @@ function readSettings() {
 
 function renderList() {
   const list = $('#character-list'); list.innerHTML = '';
+  const tabs = $('#library-folder-tabs');
+  const folderSource = selectedFilter === 'all' ? characters : characters.filter((entry) => entry.kind === selectedFilter);
+  const folders = [...new Set(folderSource.map((entry) => entry.folder || '默认'))];
+  tabs.innerHTML = '';
+  ['all', ...folders].forEach((folder) => {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = folder === 'all' ? '全部文件夹' : folder;
+    button.classList.toggle('active', selectedLibraryFolder === folder);
+    button.addEventListener('click', () => { selectedLibraryFolder = folder; renderList(); });
+    tabs.appendChild(button);
+  });
   const addHeading = (text) => { const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = text; list.appendChild(heading); };
   const addEntry = (entry) => {
     const item = document.createElement('button'); item.type = 'button';
@@ -203,7 +215,7 @@ function renderList() {
     item.addEventListener('click', () => { selectedId = entry.id; renderList(); fillCharacter(entry); });
     list.appendChild(item);
   };
-  const filtered = selectedFilter === 'all' ? characters : characters.filter((entry) => entry.kind === selectedFilter);
+  const filtered = folderSource.filter((entry) => selectedLibraryFolder === 'all' || (entry.folder || '默认') === selectedLibraryFolder);
   ['companion', 'skin', 'item', 'experience_ball'].forEach((kind) => {
     const entries = filtered.filter((entry) => entry.kind === kind).sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-CN'));
     if (!entries.length) return;
@@ -260,7 +272,7 @@ function fillCharacter(entry) {
   if (!entry) { form.reset(); toggleKindFields('companion'); return; }
   selectedId = entry.id;
   setValue(form, 'kind', entry.kind || 'companion'); setValue(form, 'id', entry.id); setValue(form, 'name', entry.name); setValue(form, 'english_name', entry.english_name || entry.skin || '');
-  setValue(form, 'quality', entry.quality || entry.star || 'R'); setValue(form, 'parent_id', entry.parent_id || ''); setValue(form, 'exclusive_items', exclusiveItemNames(entry).join('\n'));
+  setValue(form, 'quality', entry.quality || entry.star || 'R'); setValue(form, 'folder', entry.folder || '默认'); setValue(form, 'parent_id', entry.parent_id || ''); setValue(form, 'exclusive_items', exclusiveItemNames(entry).join('\n'));
   setValue(form, 'route', entry.route || ''); setValue(form, 'bonus', entry.bonus || ''); setValue(form, 'intro', entry.intro || ''); setValue(form, 'effect', entry.effect || ''); setValue(form, 'image', entry.image || '');
   setValue(form, 'focal_x', entry.focal_x ?? 0.5); setValue(form, 'focal_y', entry.focal_y ?? 0.5); setValue(form, 'exp_amount', entry.exp_amount ?? 10); setValue(form, 'draw_weight', entry.draw_weight ?? 10); setValue(form, 'mining_weight', entry.mining_weight ?? 10); setChecked(form, 'mining_pool', entry.mining_pool); setChecked(form, 'in_pool', entry.in_pool);
   const skills = entry.skills || []; [0, 1, 2].forEach((index) => { setValue(form, `skill${index}`, skills[index]?.[0] || ''); setValue(form, `skill${index}Desc`, skills[index]?.[1] || ''); });
@@ -276,7 +288,7 @@ function fillCharacter(entry) {
 function readCharacter() {
   const form = $('#character-form'); const kind = form.elements.kind.value;
   return {
-    id: form.elements.id.value.trim(), kind, name: form.elements.name.value.trim(), english_name: form.elements.english_name.value.trim(), quality: form.elements.quality.value.trim(), parent_id: form.elements.parent_id.value,
+    id: form.elements.id.value.trim(), kind, name: form.elements.name.value.trim(), english_name: form.elements.english_name.value.trim(), quality: form.elements.quality.value.trim(), folder: form.elements.folder.value.trim(), parent_id: form.elements.parent_id.value,
     exclusive_items: form.elements.exclusive_items.value.trim(), route: form.elements.route.value.trim(), bonus: form.elements.bonus.value.trim(), intro: form.elements.intro.value.trim(), effect: form.elements.effect.value.trim(), image: form.elements.image.value.trim(), in_pool: form.elements.in_pool.checked,
     focal_x: numberValue(form.elements.focal_x.value, 0.5), focal_y: numberValue(form.elements.focal_y.value, 0.5), exp_amount: numberValue(form.elements.exp_amount.value, 10), draw_weight: numberValue(form.elements.draw_weight.value, 10), mining_pool: form.elements.mining_pool.checked, mining_weight: numberValue(form.elements.mining_weight.value, 10),
     skills: [[form.elements.skill0.value.trim(), form.elements.skill0Desc.value.trim()], [form.elements.skill1.value.trim(), form.elements.skill1Desc.value.trim()], [form.elements.skill2.value.trim(), form.elements.skill2Desc.value.trim()]],
@@ -323,7 +335,7 @@ async function uploadEntryFile(file) {
 function templateDefaults(type) {
   const texts = type === 'checkin' ? CHECKIN_TEXTS : STATUS_TEXTS;
   return {
-    id: '', name: '', bound_entry_id: '', priority: 0, background_image: '', image: '', enabled: true, font_family: 'default',
+    id: '', name: '', bound_entry_id: '', priority: 0, folder: '默认', background_image: '', image: '', enabled: true, font_family: 'default',
     ...(type === 'checkin' ? { messages: ['今日也要和同伴一起前进。', '线索会回应认真观察的人。', '和同伴一起，继续推进故事。', '今天的选择，也会留下新的线索。', '下一次相遇，或许就在转角。'] } : {}),
     ...(type === 'status' ? { progress: { enabled: true, x: 0.441, y: 0.440, width: 0.455, height: 0.043, background_color: '#dbe2ef', color: '' } } : {}),
     texts: Object.fromEntries(Object.entries(texts).map(([key, value]) => [key, { ...value }])),
@@ -336,7 +348,7 @@ function textRow(container, key, config, label = '') {
   const selectedWeight = TEXT_WEIGHT_OPTIONS.some(([value]) => value === config.weight)
     ? config.weight : (config.bold ? 'bold' : 'regular');
   const weightOptions = TEXT_WEIGHT_OPTIONS.map(([value, text]) => `<option value="${value}"${value === selectedWeight ? ' selected' : ''}>${text}</option>`).join('');
-  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" /><input data-field="x" type="number" min="0" max="1" step="0.01" /><input data-field="y" type="number" min="0" max="1" step="0.01" /><input data-field="size" type="number" min="0.015" max="0.15" step="0.005" /><select data-field="font_family">${fontOptions}</select><input data-field="color" type="color" /><select data-field="weight">${weightOptions}</select><label class="shadow-control"><input data-field="shadow" type="checkbox" /><span>阴影</span></label><button class="remove-text secondary small" type="button" title="删除本行">×</button>`;
+  row.innerHTML = `<strong>${escapeHtml(label || config.label || key)}</strong><input data-field="text" /><input data-field="x" type="number" min="0" max="1" step="0.01" /><input data-field="y" type="number" min="0" max="1" step="0.01" /><input data-field="size" type="number" min="0.015" max="0.15" step="0.005" /><input data-field="color" type="color" /><select data-field="weight">${weightOptions}</select><label class="shadow-control"><input data-field="shadow" type="checkbox" /><span>阴影</span></label><button class="remove-text secondary small" type="button" title="删除本行">×</button><label class="font-control">字体<select data-field="font_family">${fontOptions}</select></label>`;
   row.querySelector('[data-field="text"]').value = config.text || '';
   row.querySelector('[data-field="x"]').value = config.x ?? 0;
   row.querySelector('[data-field="y"]').value = config.y ?? 0;
@@ -374,12 +386,22 @@ function renderTemplateList(type) {
   const list = type === 'checkin' ? checkinTemplates : statusTemplates;
   const selected = type === 'checkin' ? selectedCheckinId : selectedStatusId;
   const element = $(`#${type}-template-list`); element.innerHTML = '';
+  const folders = [...new Set(list.map((template) => template.folder || '默认'))];
+  const folderTabs = document.createElement('div'); folderTabs.className = 'folder-tabs';
+  ['all', ...folders].forEach((folder) => {
+    const button = document.createElement('button'); button.type = 'button';
+    button.textContent = folder === 'all' ? '全部' : folder;
+    button.classList.toggle('active', templateFolderFilters[type] === folder);
+    button.addEventListener('click', () => { templateFolderFilters[type] = folder; renderTemplateList(type); });
+    folderTabs.appendChild(button);
+  });
+  element.appendChild(folderTabs);
   const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = '模板（可滚动）'; element.appendChild(heading);
-  list.forEach((template) => {
+  list.filter((template) => templateFolderFilters[type] === 'all' || (template.folder || '默认') === templateFolderFilters[type]).forEach((template) => {
     const item = document.createElement('button'); item.type = 'button'; item.className = `character-item ${template.id === selected ? 'active' : ''}`;
     const binding = template.bound_entry_id ? (characters.find((entry) => entry.id === template.bound_entry_id)?.name || '已删除绑定') : '通用';
     const filename = template.background_image || template.image || '尚未上传背景';
-    item.innerHTML = `<img src="${template.preview || assetUrl(filename, type === 'checkin' ? 'checkin-assets' : 'status-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}<br />背景：${escapeHtml(filename)}</span></span>`;
+    item.innerHTML = `<img src="${template.preview || assetUrl(filename, type === 'checkin' ? 'checkin-assets' : 'status-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(template.folder || '默认')} · ${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}<br />背景：${escapeHtml(filename)}</span></span>`;
     item.addEventListener('click', () => { if (type === 'checkin') selectedCheckinId = template.id; else selectedStatusId = template.id; renderTemplateList(type); fillTemplate(type, template); });
     element.appendChild(item);
   });
@@ -413,7 +435,7 @@ function renderTemplateAssetList(type) {
 }
 function fillTemplate(type, template) {
   const form = $(`#${type}-template-form`); const data = template || templateDefaults(type);
-  setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setValue(form, 'font_family', data.font_family || 'default');
+  setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setValue(form, 'folder', data.folder || '默认'); setValue(form, 'font_family', data.font_family || 'default');
   setValue(form, 'background_image', data.background_image || data.image || '');
   setChecked(form, 'enabled', data.enabled !== false);
   if (type === 'status') {
@@ -435,7 +457,7 @@ function fillTemplate(type, template) {
 function readTemplate(type) {
   const form = $(`#${type}-template-form`);
   return {
-    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), font_family: form.elements.font_family.value,
+    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, priority: numberValue(form.elements.priority.value, 0), folder: form.elements.folder.value.trim(), font_family: form.elements.font_family.value,
     background_image: form.elements.background_image.value.trim(), enabled: form.elements.enabled.checked,
     ...(type === 'checkin' ? { messages: form.elements.messages.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).slice(0, 5) } : {}),
     ...(type === 'status' ? { progress: { enabled: form.elements.progress_enabled.checked, x: numberValue(form.elements.progress_x.value, 0.441), y: numberValue(form.elements.progress_y.value, 0.440), width: numberValue(form.elements.progress_width.value, 0.455), height: numberValue(form.elements.progress_height.value, 0.043), background_color: form.elements.progress_background_color.value, color: form.elements.progress_auto_color.checked ? '' : form.elements.progress_color.value } } : {}),
@@ -498,17 +520,26 @@ function bindProgressControls(type) {
 }
 
 function miningTemplateDefaults() {
-  return { id: '', name: '', bound_entry_id: '', priority: 0, enabled: true, background_images: [] };
+  return { id: '', name: '', bound_entry_id: '', priority: 0, folder: '默认', enabled: true, background_images: [] };
 }
 function renderMiningTemplateList() {
   const element = $('#mining-template-list'); element.innerHTML = '';
+  const folders = [...new Set(miningTemplates.map((template) => template.folder || '默认'))];
+  const folderTabs = document.createElement('div'); folderTabs.className = 'folder-tabs';
+  ['all', ...folders].forEach((folder) => {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = folder === 'all' ? '全部' : folder;
+    button.classList.toggle('active', templateFolderFilters.mining === folder);
+    button.addEventListener('click', () => { templateFolderFilters.mining = folder; renderMiningTemplateList(); });
+    folderTabs.appendChild(button);
+  });
+  element.appendChild(folderTabs);
   const heading = document.createElement('div'); heading.className = 'list-heading'; heading.textContent = '模板（可滚动）'; element.appendChild(heading);
-  miningTemplates.forEach((template) => {
+  miningTemplates.filter((template) => templateFolderFilters.mining === 'all' || (template.folder || '默认') === templateFolderFilters.mining).forEach((template) => {
     const item = document.createElement('button'); item.type = 'button'; item.className = `character-item ${template.id === selectedMiningId ? 'active' : ''}`;
     const binding = template.bound_entry_id ? (characters.find((entry) => entry.id === template.bound_entry_id)?.name || '已删除绑定') : '通用';
     const backgrounds = Array.isArray(template.background_images) ? template.background_images : [];
     const image = backgrounds[0] || '';
-    item.innerHTML = `<img src="${assetUrl(image, 'mining-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}<br />背景 ${backgrounds.length}/6</span></span>`;
+    item.innerHTML = `<img src="${assetUrl(image, 'mining-assets')}" alt="" /><span><strong>${escapeHtml(template.name || template.id)}</strong><span>${escapeHtml(template.folder || '默认')} · ${escapeHtml(binding)} · ${template.enabled ? '已启用' : '已停用'}<br />背景 ${backgrounds.length}/6</span></span>`;
     item.addEventListener('click', () => { selectedMiningId = template.id; renderMiningTemplateList(); fillMiningTemplate(template); });
     element.appendChild(item);
   });
@@ -528,14 +559,14 @@ function renderMiningBackgroundGallery() {
 function fillMiningTemplate(template) {
   const form = $('#mining-template-form'); const data = template || miningTemplateDefaults();
   selectedMiningId = data.id || '';
-  setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setChecked(form, 'enabled', data.enabled !== false);
+  setValue(form, 'id', data.id); setValue(form, 'name', data.name); setValue(form, 'bound_entry_id', data.bound_entry_id || ''); setValue(form, 'priority', data.priority ?? 0); setValue(form, 'folder', data.folder || '默认'); setChecked(form, 'enabled', data.enabled !== false);
   miningBackgrounds = Array.isArray(data.background_images) ? data.background_images.slice(0, 6) : [];
   renderMiningBackgroundGallery();
 }
 function readMiningTemplate() {
   const form = $('#mining-template-form');
   return {
-    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value,
+    id: form.elements.id.value.trim(), name: form.elements.name.value.trim(), bound_entry_id: form.elements.bound_entry_id.value, folder: form.elements.folder.value.trim(),
     priority: numberValue(form.elements.priority.value, 0), enabled: form.elements.enabled.checked,
     background_images: miningBackgrounds.slice(0, 6),
   };
@@ -557,8 +588,8 @@ async function uploadMiningBackgrounds(files) {
 function fillDrawDesign(design) {
   const form = $('#draw-design-form'); const data = design || {};
   setValue(form, 'background_image', data.background_image || '');
-  setValue(form, 'result_border_color', data.result_border_color || '#e9f3ff');
-  setValue(form, 'pity_border_color', data.pity_border_color || '#b8d5f1');
+  setValue(form, 'result_card_color', data.result_card_color || data.result_border_color || '#ffffff');
+  setValue(form, 'pity_card_color', data.pity_card_color || data.pity_border_color || '#ffffff');
   const preview = $('#draw-design-preview');
   if (data.background_image) preview.src = assetUrl(data.background_image, 'draw-assets'); else preview.removeAttribute('src');
 }
@@ -566,8 +597,8 @@ function readDrawDesign() {
   const form = $('#draw-design-form');
   return {
     background_image: form.elements.background_image.value.trim(),
-    result_border_color: form.elements.result_border_color.value,
-    pity_border_color: form.elements.pity_border_color.value,
+    result_card_color: form.elements.result_card_color.value,
+    pity_card_color: form.elements.pity_card_color.value,
   };
 }
 async function uploadDrawBackground(file) {
@@ -585,7 +616,7 @@ function assetPayload() {
 function bindEvents() {
   $('#refresh').addEventListener('click', () => safely(loadAll));
   $$('.type-filter button').forEach((button) => button.addEventListener('click', () => {
-    selectedFilter = button.dataset.filter; $$('.type-filter button').forEach((entry) => entry.classList.toggle('active', entry === button)); renderList();
+    selectedFilter = button.dataset.filter; selectedLibraryFolder = 'all'; $$('.type-filter button').forEach((entry) => entry.classList.toggle('active', entry === button)); renderList();
   }));
   $$('.color-tabs button').forEach((button) => button.addEventListener('click', () => {
     $$('.color-tabs button').forEach((entry) => entry.classList.toggle('active', entry === button)); renderColorGroup();
@@ -607,7 +638,7 @@ function bindEvents() {
     await loadAll();
   }));
   $('#new-character').addEventListener('click', () => {
-    selectedId = ''; const form = $('#character-form'); form.reset(); form.elements.kind.value = 'companion'; form.elements.quality.value = 'SR'; form.elements.focal_x.value = '0.5'; form.elements.focal_y.value = '0.5'; form.elements.exp_amount.value = '10'; form.elements.draw_weight.value = '10';
+    selectedId = ''; const form = $('#character-form'); form.reset(); form.elements.kind.value = 'companion'; form.elements.quality.value = 'SR'; form.elements.folder.value = '默认'; form.elements.focal_x.value = '0.5'; form.elements.focal_y.value = '0.5'; form.elements.exp_amount.value = '10'; form.elements.draw_weight.value = '10';
     toggleKindFields('companion'); $('#preview-image').removeAttribute('src'); $('#preview-title').textContent = '新增条目'; $('#preview-subtitle').textContent = '填写资料后上传图片；可调画面焦点。'; renderList();
   });
   $('#save-button').addEventListener('click', () => safely(async () => {
