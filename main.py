@@ -169,7 +169,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     },
 ]
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡、挖矿与抽奖插件", "2.5.1")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡、挖矿与抽奖插件", "2.5.2")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -1216,7 +1216,7 @@ class JubenNpcPlugin(Star):
             # resolving their background after the schema upgrade.
             "image": "",
             "enabled": True,
-            "font_family": "default",
+            "font_family": "cute",
             "messages": [
                 "今日也要和同伴一起前进。",
                 "线索会回应认真观察的人。",
@@ -1243,7 +1243,7 @@ class JubenNpcPlugin(Star):
             "background_image": "",
             "image": "",
             "enabled": True,
-            "font_family": "default",
+            "font_family": "cute",
             "progress": {
                 "enabled": True,
                 "x": 0.441,
@@ -1429,8 +1429,10 @@ class JubenNpcPlugin(Star):
             base["priority"] = int(base.get("priority", 0) or 0)
         base["folder"] = str(data.get("folder") or base.get("folder") or "默认").strip()[:30] or "默认"
         base["enabled"] = bool(data.get("enabled", True))
-        family = str(data.get("font_family") or base.get("font_family") or "default").strip().lower()
-        base["font_family"] = family if family in FONT_FAMILIES else "default"
+        # The customer wants a single, cute typeface for all template text.
+        # Keep this server-side too so older saved templates cannot reintroduce
+        # a hidden per-template or per-line font choice.
+        base["font_family"] = "cute"
         if "progress" in base:
             defaults = base.get("progress") if isinstance(base.get("progress"), dict) else {}
             source = data.get("progress") if isinstance(data.get("progress"), dict) else {}
@@ -1476,7 +1478,7 @@ class JubenNpcPlugin(Star):
             source = raw_source if isinstance(raw_source, dict) else {}
             text = str(source.get("text", defaults.get("text", "")) or "")[:180]
             color = str(source.get("color") or defaults.get("color", "#ffffff"))
-            item_family = self._normalize_text_font_family(source.get("font_family"))
+            item_family = "cute"
             weight = self._normalize_text_weight(source.get("weight"), source.get("bold", defaults.get("bold", False)))
             normalized_texts[safe_key] = {
                 "text": text,
@@ -1487,9 +1489,6 @@ class JubenNpcPlugin(Star):
                 "bold": weight != "regular",
                 "weight": weight,
                 "shadow": self._template_bool(source.get("shadow", True)),
-                # Keep the inheritance marker rather than replacing it with the
-                # template's current font.  Otherwise changing the template
-                # font later appears to do nothing for existing text rows.
                 "font_family": item_family,
             }
         base["texts"] = normalized_texts
@@ -3054,8 +3053,10 @@ class JubenNpcPlugin(Star):
             if not text:
                 continue
             font_size = max(14, int(float(item.get("size", 0.04)) * size[0]))
-            row_family = self._normalize_text_font_family(item.get("font_family"))
-            family = template.get("font_family", "default") if row_family == "inherit" else row_family
+            # Template typography is intentionally not configurable.  Do not
+            # trust raw/legacy payloads here: every preview and rendered card
+            # must use the one supported cute typeface.
+            family = "cute"
             weight = self._normalize_text_weight(item.get("weight"), item.get("bold"))
             bold = weight != "regular"
             font = self._font(font_size, bold, str(family))
@@ -3237,7 +3238,7 @@ class JubenNpcPlugin(Star):
         }
         if banner:
             draw.rounded_rectangle((920, 96, 1148, 136), radius=16, fill=main)
-            draw.text((938, 102), banner, font=self._font(20, True, template.get("font_family", "default")), fill="white")
+            draw.text((938, 102), banner, font=self._font(20, True, "cute"), fill="white")
         # The progression bar is part of the status template rather than a
         # second hard-coded module.  Its data always comes from the displayed
         # companion, while an equipped skin can contribute its visual colour.

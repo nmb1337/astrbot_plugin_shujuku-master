@@ -83,7 +83,7 @@ def plugin_instance():
 
 
 class TemplateManagementTests(unittest.TestCase):
-    def test_rows_can_be_deleted_and_keep_font_inheritance(self):
+    def test_rows_can_be_deleted_and_are_forced_to_the_cute_font(self):
         instance = plugin_instance()
         template = instance._normalize_checkin_template(
             {
@@ -105,7 +105,8 @@ class TemplateManagementTests(unittest.TestCase):
         )
 
         self.assertEqual(set(template["texts"]), {"custom"})
-        self.assertEqual(template["texts"]["custom"]["font_family"], "inherit")
+        self.assertEqual(template["font_family"], "cute")
+        self.assertEqual(template["texts"]["custom"]["font_family"], "cute")
         self.assertEqual(template["texts"]["custom"]["weight"], "heavy")
         self.assertTrue(template["texts"]["custom"]["bold"])
         self.assertFalse(template["texts"]["custom"]["shadow"])
@@ -136,6 +137,14 @@ class TemplateManagementTests(unittest.TestCase):
         instance = plugin_instance()
         with tempfile.TemporaryDirectory() as temporary:
             instance.font_dir = Path(temporary)
+            requested_families = []
+            original_font = instance._font
+
+            def capture_font(size, bold=False, family="default"):
+                requested_families.append(family)
+                return original_font(size, bold, family)
+
+            instance._font = capture_font
             template = {
                 "font_family": "default",
                 "texts": {
@@ -162,6 +171,7 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertIsNotNone(bbox)
         self.assertGreaterEqual(bbox[0], 200)
         self.assertGreaterEqual(bbox[1], 50)
+        self.assertEqual(set(requested_families), {"cute"})
 
     def test_template_selection_prefers_equipped_skin_then_companion_then_general(self):
         instance = plugin_instance()
@@ -479,13 +489,11 @@ class TemplateManagementTests(unittest.TestCase):
             with Image.open(mining_path) as image:
                 self.assertEqual(image.getpixel((60, 54))[:3], (69, 103, 137))
 
-    def test_available_font_presets_have_real_font_files(self):
+    def test_cute_template_font_has_a_real_font_file(self):
         instance = plugin_instance()
         instance.font_dir = Path(tempfile.gettempdir()) / "missing-plugin-fonts"
 
-        for family in ("msyh", "msyh_light", "deng", "simhei", "simsun", "kaiti", "cute", "comic"):
-            with self.subTest(family=family):
-                self.assertIsNotNone(instance._find_font_file(False, family))
+        self.assertIsNotNone(instance._find_font_file(False, "cute"))
 
     def test_inventory_can_keep_six_companion_groups_on_one_page(self):
         instance = plugin_instance()
