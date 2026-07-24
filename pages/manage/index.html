@@ -156,11 +156,14 @@
       </section>
 
       <section class="board" id="draw-board">
-        <div class="board-title"><div><span>第五板块</span><h2>抽奖结果设计</h2><p>结果页只保留抽奖结果和保底框；上传一张全背景，并分别调整结果卡边框与保底框边框颜色。</p></div></div>
+        <div class="board-title"><div><span>第五板块</span><h2>抽奖结果设计</h2><p>上传一张全背景；结果卡按经验球、道具和大奖三类分别调整内部填充色。</p></div></div>
         <section class="panel draw-design-panel">
           <form id="draw-design-form" class="template-form">
             <input name="background_image" type="hidden" />
-            <label>结果卡白色区域<input name="result_card_color" type="color" value="#ffffff" /></label><label>保底白色区域<input name="pity_card_color" type="color" value="#ffffff" /></label>
+            <label>奖池 ID<input name="pool_id" type="text" value="default" maxlength="80" /></label>
+            <label>经验球结果卡填充色<input name="experience_ball_card_color" type="color" value="#ffffff" /></label>
+            <label>道具结果卡填充色<input name="item_card_color" type="color" value="#ffffff" /></label>
+            <label>大奖结果卡填充色<input name="jackpot_card_color" type="color" value="#ffffff" /></label>
           </form>
           <div id="draw-background-dropzone" class="dropzone compact"><strong>上传抽奖全背景</strong><span>上传后直接应用到抽奖结果；不再显示同伴/皮肤奖池框。</span><input id="draw-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
           <div class="upload-row"><button id="save-draw-design" type="button">保存抽奖设计</button></div><img id="draw-design-preview" class="template-preview draw-design-preview" alt="抽奖背景预览" />

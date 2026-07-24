@@ -574,8 +574,11 @@ async function uploadMiningBackgrounds(files) {
 function fillDrawDesign(design) {
   const form = $('#draw-design-form'); const data = design || {};
   setValue(form, 'background_image', data.background_image || '');
-  setValue(form, 'result_card_color', data.result_card_color || data.result_border_color || '#ffffff');
-  setValue(form, 'pity_card_color', data.pity_card_color || data.pity_border_color || '#ffffff');
+  const legacyColor = data.result_card_color || data.result_border_color || '#ffffff';
+  setValue(form, 'pool_id', data.pool_id || 'default');
+  setValue(form, 'experience_ball_card_color', data.experience_ball_card_color || legacyColor);
+  setValue(form, 'item_card_color', data.item_card_color || legacyColor);
+  setValue(form, 'jackpot_card_color', data.jackpot_card_color || legacyColor);
   const preview = $('#draw-design-preview');
   if (data.background_image) preview.src = assetUrl(data.background_image, 'draw-assets'); else preview.removeAttribute('src');
 }
@@ -583,8 +586,10 @@ function readDrawDesign() {
   const form = $('#draw-design-form');
   return {
     background_image: form.elements.background_image.value.trim(),
-    result_card_color: form.elements.result_card_color.value,
-    pity_card_color: form.elements.pity_card_color.value,
+    pool_id: form.elements.pool_id.value.trim(),
+    experience_ball_card_color: form.elements.experience_ball_card_color.value,
+    item_card_color: form.elements.item_card_color.value,
+    jackpot_card_color: form.elements.jackpot_card_color.value,
   };
 }
 async function uploadDrawBackground(file) {

@@ -1,4 +1,5 @@
 import base64
+import copy
 import json
 import inspect
 import os
@@ -169,7 +170,7 @@ DEFAULT_CHARACTERS: List[Dict[str, Any]] = [
     },
 ]
 
-@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡、挖矿与抽奖插件", "2.5.3")
+@register("astrbot_plugin_juben_npc", "Codex", "剧本杀同伴、皮肤、道具、经验球、模板、星币、打卡、挖矿与抽奖插件", "2.5.4")
 class JubenNpcPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -189,7 +190,7 @@ class JubenNpcPlugin(Star):
         self.mining_templates_path = self.data_dir / "mining_templates.json"
         self.draw_design_path = self.data_dir / "draw_design.json"
         self.settings_path = self.data_dir / "settings.json"
-        self.db: Dict[str, Any] = {"scopes": {}}
+        self.db: Dict[str, Any] = {"schema_version": 4, "scopes": {}, "players": {}}
         self.characters: List[Dict[str, Any]] = []
         self.checkin_templates: List[Dict[str, Any]] = []
         self.status_templates: List[Dict[str, Any]] = []
@@ -509,10 +510,11 @@ class JubenNpcPlugin(Star):
             return
 
         player["coins"] -= coin_cost
-        results = [self._roll_draw(player) for _ in range(count)]
+        scope_id = self._scope_id(event)
+        results = [self._roll_draw(player, scope_id) for _ in range(count)]
         self._save_db()
 
-        path = self._render_draw(player, results, coin_cost, 0)
+        path = self._render_draw(player, results, coin_cost, 0, scope_id)
         yield event.image_result(str(path))
 
     @filter.command("挖矿", alias={"每日挖矿", "挖矿领取"})
@@ -1115,8 +1117,11 @@ class JubenNpcPlugin(Star):
 
     def _migrate_database(self):
         if not isinstance(self.db, dict):
-            self.db = {"scopes": {}}
-        previous_version = int(self.db.get("schema_version", 1) or 1)
+            self.db = {"scopes": {}, "players": {}}
+        try:
+            previous_version = int(self.db.get("schema_version", 1) or 1)
+        except (TypeError, ValueError):
+            previous_version = 1
         if previous_version < 2:
             self._backup_once(self.db_path, "v1")
         scopes = self.db.setdefault("scopes", {})
@@ -1146,9 +1151,94 @@ class JubenNpcPlugin(Star):
                     if isinstance(value, dict):
                         value.setdefault("owned_at", value.get("obtained_at", ""))
                         value.setdefault("full_at", "")
-        if previous_version < 3:
-            self.db["schema_version"] = 3
+
+        # Version 4 makes a QQ user's assets global.  Group/session scope is
+        # intentionally preserved only below draw_pity_states: the customer
+        # asked for shared companions, skins, items and progress, while each
+        # pool guarantee must remain independent for every conversation.
+        shared_players = self.db.setdefault("players", {})
+        if not isinstance(shared_players, dict):
+            shared_players = self.db["players"] = {}
+        if previous_version < 4:
+            for scope_id, scope in scopes.items():
+                if not isinstance(scope, dict):
+                    continue
+                legacy_players = scope.get("players")
+                if not isinstance(legacy_players, dict):
+                    continue
+                for raw_user_id, legacy_player in legacy_players.items():
+                    if not isinstance(legacy_player, dict):
+                        continue
+                    user_id = str(raw_user_id)
+                    canonical = shared_players.get(user_id)
+                    if not isinstance(canonical, dict):
+                        canonical = copy.deepcopy(legacy_player)
+                        shared_players[user_id] = canonical
+                    else:
+                        self._merge_shared_player(canonical, legacy_player)
+                    canonical.setdefault("user_id", user_id)
+                    canonical.setdefault("last_scope_id", str(scope_id))
+                    pity_states = canonical.setdefault("draw_pity_states", {})
+                    if not isinstance(pity_states, dict):
+                        pity_states = canonical["draw_pity_states"] = {}
+                    scope_states = pity_states.setdefault(str(scope_id), {})
+                    if not isinstance(scope_states, dict):
+                        scope_states = pity_states[str(scope_id)] = {}
+                    if "default" not in scope_states:
+                        legacy_state = legacy_player.get("draw_state")
+                        scope_states["default"] = copy.deepcopy(legacy_state) if isinstance(legacy_state, dict) else {}
+
+        if previous_version < 4:
+            self.db["schema_version"] = 4
             self._save_db()
+
+    @staticmethod
+    def _merge_shared_player(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Merge legacy per-scope records without duplicating mirrored assets."""
+        if not target.get("name") and source.get("name"):
+            target["name"] = source["name"]
+        for key in ("coins", "tickets"):
+            try:
+                target[key] = max(int(target.get(key, 0) or 0), int(source.get(key, 0) or 0))
+            except (TypeError, ValueError):
+                target[key] = 0
+        for key in ("last_checkin", "last_mining", "last_checkin_message"):
+            target[key] = max(str(target.get(key) or ""), str(source.get(key) or ""))
+        for key in ("npcs", "skins", "items", "exclusive_items"):
+            if not isinstance(target.get(key), dict):
+                target[key] = {}
+        for character_id, record in (source.get("npcs") or {}).items():
+            if character_id not in target["npcs"]:
+                target["npcs"][character_id] = copy.deepcopy(record)
+                continue
+            current = target["npcs"][character_id]
+            if isinstance(current, dict) and isinstance(record, dict):
+                current["exp"] = max(int(current.get("exp", 0) or 0), int(record.get("exp", 0) or 0))
+                for date_key in ("owned_at", "full_at"):
+                    current[date_key] = min(
+                        value for value in (str(current.get(date_key) or ""), str(record.get(date_key) or "")) if value
+                    ) if any((current.get(date_key), record.get(date_key))) else ""
+        for skin_id, record in (source.get("skins") or {}).items():
+            target["skins"].setdefault(skin_id, copy.deepcopy(record))
+        for item_id, record in (source.get("items") or {}).items():
+            if item_id not in target["items"]:
+                target["items"][item_id] = copy.deepcopy(record)
+                continue
+            current = target["items"][item_id]
+            if isinstance(current, dict) and isinstance(record, dict):
+                current["count"] = max(int(current.get("count", 0) or 0), int(record.get("count", 0) or 0))
+        for companion_id, records in (source.get("exclusive_items") or {}).items():
+            if companion_id not in target["exclusive_items"]:
+                target["exclusive_items"][companion_id] = copy.deepcopy(records)
+                continue
+            current = target["exclusive_items"][companion_id]
+            if isinstance(current, dict) and isinstance(records, dict):
+                for item_name, record in records.items():
+                    current.setdefault(item_name, copy.deepcopy(record))
+        for key in ("current_npc", "current_skin", "last_scope_id"):
+            if not target.get(key) and source.get(key):
+                target[key] = source[key]
+        target["allow_empty_npcs"] = bool(target.get("allow_empty_npcs", True) and source.get("allow_empty_npcs", True))
 
     def _load_characters(self):
         if not self.characters_path.exists():
@@ -1272,7 +1362,13 @@ class JubenNpcPlugin(Star):
     def _default_draw_design() -> Dict[str, Any]:
         return {
             "background_image": "",
-            "result_card_color": "#ffffff",
+            "pool_id": "default",
+            "experience_ball_card_color": "#ffffff",
+            "item_card_color": "#ffffff",
+            "jackpot_card_color": "#ffffff",
+            # This is intentionally retained only to preserve the existing
+            # progress-card appearance.  The operator-facing result controls
+            # are the three categories above, not this legacy setting.
             "pity_card_color": "#ffffff",
         }
 
@@ -1391,13 +1487,23 @@ class JubenNpcPlugin(Star):
         base = self._default_draw_design()
         background = Path(str(data.get("background_image") or "")).name
         base["background_image"] = background
-        legacy_keys = {
-            "result_card_color": "result_border_color",
-            "pity_card_color": "pity_border_color",
-        }
-        for key, legacy_key in legacy_keys.items():
-            value = str(data.get(key) or data.get(legacy_key) or base[key])
+        pool_id = "".join(ch for ch in str(data.get("pool_id") or "") if ord(ch) >= 32 and ch != "\\").strip()
+        base["pool_id"] = pool_id[:80] or "default"
+
+        # A previous version exposed one shared result-card color.  Promote it
+        # to all three result categories once so old designs retain their look
+        # until the operator chooses separate colors.
+        legacy_result = str(data.get("result_card_color") or data.get("result_border_color") or "")
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", legacy_result):
+            legacy_result = base["experience_ball_card_color"]
+        for key in ("experience_ball_card_color", "item_card_color", "jackpot_card_color"):
+            value = str(data.get(key) or legacy_result or base[key])
             base[key] = value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else base[key]
+
+        # This is not a result-card setting, but retaining an old saved value
+        # avoids an unrelated visual change to the progress card on upgrade.
+        pity_value = str(data.get("pity_card_color") or data.get("pity_border_color") or base["pity_card_color"])
+        base["pity_card_color"] = pity_value if re.fullmatch(r"#[0-9a-fA-F]{6}", pity_value) else base["pity_card_color"]
         return base
 
     def _normalize_visual_template(self, data: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
@@ -1712,12 +1818,15 @@ class JubenNpcPlugin(Star):
 
     def _known_players(self) -> List[Dict[str, Any]]:
         players: List[Dict[str, Any]] = []
-        for scope_id, scope in self.db.get("scopes", {}).items():
-            for user_id, player in scope.get("players", {}).items():
+        shared = self.db.get("players", {})
+        if isinstance(shared, dict):
+            for user_id, player in shared.items():
+                if not isinstance(player, dict):
+                    continue
                 players.append(
                     {
-                        "scope_id": scope_id,
-                        "user_id": user_id,
+                        "scope_id": str(player.get("last_scope_id") or "共享玩家档案"),
+                        "user_id": str(user_id),
                         "name": player.get("name") or user_id,
                         "current_npc": player.get("current_npc"),
                         "owned_count": len(player.get("npcs", {})) + len(player.get("skins", {})),
@@ -1837,6 +1946,7 @@ class JubenNpcPlugin(Star):
         return {
             "user_id": user_id,
             "name": name,
+            "last_scope_id": "",
             "coins": 0,
             "tickets": 0,
             "last_checkin": "",
@@ -1852,6 +1962,7 @@ class JubenNpcPlugin(Star):
             # migration routine from silently granting it back.
             "allow_empty_npcs": True,
             "draw_state": {"pity_count": 0, "next_pity_kind": "random", "starter_pending": True, "starter_skin_pending": False},
+            "draw_pity_states": {},
         }
 
     def _get_player(self, event: AstrMessageEvent) -> Dict[str, Any]:
@@ -1867,13 +1978,14 @@ class JubenNpcPlugin(Star):
         new starter player, which is why revoke uses this instead of the normal
         get-or-create path.
         """
-        scope = self.db.get("scopes", {}).get(str(scope_id))
-        if not isinstance(scope, dict):
-            return None
-        players = scope.get("players")
-        if not isinstance(players, dict):
-            return None
-        player = players.get(str(user_id))
+        players = self.db.get("players")
+        player = players.get(str(user_id)) if isinstance(players, dict) else None
+        # A pre-v4 database can be queried before its next normal startup
+        # migration.  Read the requested legacy scope as a compatibility path.
+        if not isinstance(player, dict):
+            scope = self.db.get("scopes", {}).get(str(scope_id))
+            scope_players = scope.get("players") if isinstance(scope, dict) else None
+            player = scope_players.get(str(user_id)) if isinstance(scope_players, dict) else None
         if not isinstance(player, dict):
             return None
         # Reuse the canonical migration/default logic now that existence has
@@ -1881,9 +1993,22 @@ class JubenNpcPlugin(Star):
         return self._get_player_by_scope(scope_id, str(user_id), str(player.get("name") or user_id))
 
     def _get_player_by_scope(self, scope_id: str, user_id: str, name: str) -> Dict[str, Any]:
-        players = self._db_scope(scope_id).setdefault("players", {})
-        player = players.setdefault(str(user_id), self._new_player(str(user_id), name))
+        user_id = str(user_id)
+        shared_players = self.db.setdefault("players", {})
+        if not isinstance(shared_players, dict):
+            shared_players = self.db["players"] = {}
+        player = shared_players.get(user_id)
+        if not isinstance(player, dict):
+            # Keep compatibility with an instance that has not run the v4
+            # migration yet, while all new writes go to the shared archive.
+            legacy_scope = self.db.setdefault("scopes", {}).get(str(scope_id), {})
+            legacy_players = legacy_scope.get("players") if isinstance(legacy_scope, dict) else None
+            legacy = legacy_players.get(user_id) if isinstance(legacy_players, dict) else None
+            player = copy.deepcopy(legacy) if isinstance(legacy, dict) else self._new_player(user_id, name)
+            shared_players[user_id] = player
+        player.setdefault("user_id", user_id)
         player["name"] = name or player.get("name") or str(user_id)
+        player["last_scope_id"] = str(scope_id or player.get("last_scope_id") or "")
         player.setdefault("coins", 0)
         player.setdefault("tickets", 0)
         player.setdefault("npcs", {})
@@ -1894,6 +2019,7 @@ class JubenNpcPlugin(Star):
         player.setdefault("last_mining", "")
         player.setdefault("allow_empty_npcs", False)
         player.setdefault("draw_state", {"pity_count": 0, "next_pity_kind": "random", "starter_pending": not bool(player.get("npcs"))})
+        player.setdefault("draw_pity_states", {})
         self._migrate_player_npcs(player)
         if not player["npcs"] and not player.get("allow_empty_npcs"):
             starter = "rin" if self._character_or_none("rin") else self._companions()[0]["id"]
@@ -2014,19 +2140,64 @@ class JubenNpcPlugin(Star):
         draw_state = player.setdefault("draw_state", {})
         if not isinstance(draw_state, dict):
             draw_state = player["draw_state"] = {}
-        draw_state["pity_count"] = max(0, min(DRAW_PITY_TARGET, int(draw_state.get("pity_count", 0) or 0)))
-        if draw_state.get("next_pity_kind") not in {"random", COMPANION_KIND, SKIN_KIND}:
-            draw_state["next_pity_kind"] = "random"
+        has_companion = bool(player.get("npcs"))
+        self._normalize_draw_state(draw_state, has_companion)
+
+        pity_states = player.setdefault("draw_pity_states", {})
+        if not isinstance(pity_states, dict):
+            pity_states = player["draw_pity_states"] = {}
+        for scope_states in pity_states.values():
+            if not isinstance(scope_states, dict):
+                continue
+            for state in scope_states.values():
+                if isinstance(state, dict):
+                    self._normalize_draw_state(state, has_companion)
+
+    @staticmethod
+    def _normalize_draw_state(state: Dict[str, Any], has_companion: bool) -> None:
+        """Normalize one pool's guarantee state without sharing it across pools."""
+        try:
+            state["pity_count"] = max(0, min(DRAW_PITY_TARGET, int(state.get("pity_count", 0) or 0)))
+        except (TypeError, ValueError):
+            state["pity_count"] = 0
+        if state.get("next_pity_kind") not in {"random", COMPANION_KIND, SKIN_KIND}:
+            state["next_pity_kind"] = "random"
         # A previous release used ``guarantee_stage`` for every account, so
         # any player who already owned a companion was guaranteed a companion
         # and skin at the start of the next draw.  The opening guide belongs
         # only to an account with no companion at all.
-        has_companion = bool(player.get("npcs"))
-        draw_state["starter_pending"] = not has_companion
-        draw_state["starter_skin_pending"] = bool(
-            draw_state.get("starter_skin_pending", False) and has_companion
-        )
-        draw_state.pop("guarantee_stage", None)
+        state["starter_pending"] = not has_companion
+        state["starter_skin_pending"] = bool(state.get("starter_skin_pending", False) and has_companion)
+        state.pop("guarantee_stage", None)
+
+    def _current_draw_pool_id(self) -> str:
+        design = getattr(self, "draw_design", {})
+        value = str(design.get("pool_id") or "default") if isinstance(design, dict) else "default"
+        return "".join(ch for ch in value if ord(ch) >= 32 and ch != "\\").strip()[:80] or "default"
+
+    def _draw_state_for(self, player: Dict[str, Any], scope_id: str, pool_id: Optional[str] = None) -> Dict[str, Any]:
+        """Return the independent guarantee state for one conversation and pool."""
+        safe_scope_id = str(scope_id or "global")
+        safe_pool_id = str(pool_id or self._current_draw_pool_id())
+        pity_states = player.setdefault("draw_pity_states", {})
+        if not isinstance(pity_states, dict):
+            pity_states = player["draw_pity_states"] = {}
+        scope_states = pity_states.get(safe_scope_id)
+        if not isinstance(scope_states, dict):
+            scope_states = pity_states[safe_scope_id] = {}
+        state = scope_states.get(safe_pool_id)
+        if not isinstance(state, dict):
+            # Promote the old single state exactly once, on the first pool
+            # access.  This preserves progress for upgrades without allowing
+            # it to leak into a later pool_id or another conversation.
+            legacy = player.get("draw_state")
+            state = copy.deepcopy(legacy) if isinstance(legacy, dict) and (not pity_states or not any(pity_states.values())) else {}
+            scope_states[safe_pool_id] = state
+        self._normalize_draw_state(state, bool(player.get("npcs")))
+        # Keep a read-only compatibility mirror for old data and integrations;
+        # all gameplay logic reads the scoped state above.
+        player["draw_state"] = state
+        return state
 
     def _character(self, character_id: str) -> Dict[str, Any]:
         companion = self._character_or_none(character_id)
@@ -2487,21 +2658,18 @@ class JubenNpcPlugin(Star):
             "image": entry.get("image", ""),
         }
 
-    def _roll_draw(self, player: Dict[str, Any]) -> Dict[str, Any]:
+    def _roll_draw(self, player: Dict[str, Any], scope_id: str = "global", pool_id: Optional[str] = None) -> Dict[str, Any]:
         """Resolve a fully-paid draw with no empty result slots.
 
         Only accounts without a companion receive the opening companion/skin
         guide.  Established players always use the public 86/13/0.5/0.5
-        table, plus the 100-draw guarantee against the *current* pool.
+        table, plus a guarantee state isolated by conversation and pool_id.
         """
         current_id = str(player.get("current_npc") or "")
         if not current_id:
             companions = self._companions()
             current_id = companions[0]["id"] if companions else ""
-        state = player.setdefault(
-            "draw_state",
-            {"pity_count": 0, "next_pity_kind": "random", "starter_pending": not bool(player.get("npcs"))},
-        )
+        state = self._draw_state_for(player, scope_id, pool_id)
         state["pity_count"] = max(0, int(state.get("pity_count", 0) or 0)) + 1
 
         companion_pool = self._draw_pool(COMPANION_KIND)
@@ -2517,19 +2685,35 @@ class JubenNpcPlugin(Star):
             return self._grant_draw_entry(player, random.choice(skin_pool), "首次皮肤")
 
         if state["pity_count"] >= DRAW_PITY_TARGET and (companion_pool or skin_pool):
-            requested = state.get("next_pity_kind", "random")
-            if requested == "random":
-                requested = random.choice(
-                    [kind for kind, pool in ((COMPANION_KIND, companion_pool), (SKIN_KIND, skin_pool)) if pool]
-                )
-            pool = companion_pool if requested == COMPANION_KIND else skin_pool
-            if not pool:
-                requested = SKIN_KIND if requested == COMPANION_KIND else COMPANION_KIND
-                pool = skin_pool if requested == SKIN_KIND else companion_pool
+            missing_companions = [entry for entry in companion_pool if not self._owns_entry(player, entry)]
+            missing_skins = [entry for entry in skin_pool if not self._owns_entry(player, entry)]
             state["pity_count"] = 0
-            state["next_pity_kind"] = SKIN_KIND if requested == COMPANION_KIND else COMPANION_KIND
-            label = "保底同伴" if requested == COMPANION_KIND else "保底皮肤"
-            return self._grant_draw_entry(player, random.choice(pool), label)
+            state["next_pity_kind"] = "random"
+            available_kinds = [
+                kind
+                for kind, entries in ((COMPANION_KIND, missing_companions), (SKIN_KIND, missing_skins))
+                if entries
+            ]
+            if available_kinds:
+                requested = random.choice(available_kinds)
+                pool = missing_companions if requested == COMPANION_KIND else missing_skins
+                label = "保底同伴" if requested == COMPANION_KIND else "保底皮肤"
+                return self._grant_draw_entry(player, random.choice(pool), label)
+
+            # The current pool is fully collected.  Do not use an arbitrary
+            # pool entry as a proxy: the documented duplicate reward is always
+            # +20 EXP on the player's currently equipped companion.
+            current = self._character(current_id)
+            exp = self._add_exp(player, current_id, 20) if current_id else 0
+            return {
+                "kind": "保底重复奖励转经验",
+                "name": current.get("name", "当前同伴"),
+                "exp": exp,
+                "character_id": current_id,
+                "entry_id": current_id,
+                "entry_kind": COMPANION_KIND,
+                "image": current.get("image", ""),
+            }
 
         roll = random.random() * 100
         cursor = 0.0
@@ -2552,13 +2736,13 @@ class JubenNpcPlugin(Star):
         if roll < cursor:
             if companion_pool:
                 state["pity_count"] = 0
-                state["next_pity_kind"] = SKIN_KIND
+                state["next_pity_kind"] = "random"
                 return self._grant_draw_entry(player, random.choice(companion_pool), "同伴")
 
         # The preceding branches cover 99.5%; the final branch (including any
         # float roundoff at exactly 100) always resolves to a skin.
         state["pity_count"] = 0
-        state["next_pity_kind"] = COMPANION_KIND
+        state["next_pity_kind"] = "random"
         return self._grant_draw_entry(player, random.choice(skin_pool), "皮肤")
 
     def _slug(self, value: str) -> str:
@@ -3348,7 +3532,7 @@ class JubenNpcPlugin(Star):
         height = max(
             860,
             150 + sum(
-                companion_row_height(exclusive_items) + 7 + len(skins) * 64
+                companion_row_height(exclusive_items) + 7 + len(skins) * 94
                 for _, _, _, skins, _, _, exclusive_items in groups
             ) + 28,
         )
@@ -3416,18 +3600,21 @@ class JubenNpcPlugin(Star):
             y += row_height + 5
 
             for skin in owned_skins:
-                # A small offset makes it immediately clear that this is a
-                # companion attachment, without wasting the card's width.
-                skin_x = 82
-                draw.rounded_rectangle((skin_x, y, 1228, y + 57), radius=12, fill=(255, 255, 255, 225), outline=border_color, width=1)
-                portrait = self._portrait(skin, (108, 49))
-                img.alpha_composite(portrait, (skin_x + 9, y + 4))
-                draw.text((skin_x + 132, y + 8), f"皮肤：{skin['name']}", font=self._font(21, True), fill=title_color)
-                draw.text((skin_x + 132, y + 34), f"{skin.get('english_name') or skin['name']}  |  {skin.get('quality', skin.get('star', 'R'))}", font=self._font(16), fill=meta_color)
+                # Skin cards are true child cards: visibly indented and
+                # narrower than their parent, while remaining tall enough for
+                # a readable portrait and three non-overlapping text lines.
+                skin_x, skin_right, skin_height = 156, 1144, 84
+                draw.rounded_rectangle((skin_x, y, skin_right, y + skin_height), radius=14, fill=(255, 255, 255, 225), outline=border_color, width=1)
+                portrait = self._portrait(skin, (132, 74))
+                img.alpha_composite(portrait, (skin_x + 8, y + 5))
+                text_x = skin_x + 160
+                draw.text((text_x, y + 9), f"皮肤：{skin['name']}", font=self._font(22, True), fill=title_color)
+                draw.text((text_x, y + 40), skin.get("english_name") or skin["name"], font=self._font(16), fill=meta_color)
+                draw.text((text_x, y + 62), f"品质：{skin.get('quality', skin.get('star', 'R'))}", font=self._font(14, True), fill=meta_color)
                 if skin["id"] == player.get("current_skin"):
-                    draw.rounded_rectangle((1119, y + 13, 1208, y + 43), radius=10, fill=companion["colors"][0])
-                    draw.text((1134, y + 16), "已装备", font=self._font(14, True), fill="white")
-                y += 64
+                    draw.rounded_rectangle((1018, y + 27, 1128, y + 57), radius=10, fill=companion["colors"][0])
+                    draw.text((1034, y + 30), "已装备", font=self._font(14, True), fill="white")
+                y += 94
         img.save(path)
         return path
 
@@ -3502,7 +3689,28 @@ class JubenNpcPlugin(Star):
         img.save(path)
         return path
 
-    def _render_draw(self, player: Dict[str, Any], results: List[Dict[str, Any]], coin_cost: int, ticket_used: int) -> Path:
+    def _draw_result_card_fill(self, result: Dict[str, Any]) -> str:
+        """Select one of the three operator-configured result-card fills."""
+        entry_kind = str(result.get("entry_kind") or "")
+        label = str(result.get("kind") or "")
+        if entry_kind == EXPERIENCE_BALL_KIND or label == "经验球":
+            key = "experience_ball_card_color"
+        elif entry_kind == ITEM_KIND or label == "道具":
+            key = "item_card_color"
+        else:
+            # Companion, skin, and their duplicate-reward variants are all
+            # jackpots by design and therefore deliberately share one fill.
+            key = "jackpot_card_color"
+        return self._template_color(self.draw_design.get(key), "#ffffff")
+
+    def _render_draw(
+        self,
+        player: Dict[str, Any],
+        results: List[Dict[str, Any]],
+        coin_cost: int,
+        ticket_used: int,
+        scope_id: str = "global",
+    ) -> Path:
         path = self.render_dir / f"draw_{player['user_id']}.png"
         size = (1180, 760)
         background_name = str(self.draw_design.get("background_image") or "")
@@ -3512,13 +3720,12 @@ class JubenNpcPlugin(Star):
         else:
             img = self._gradient(size, "#231942", "#4d908e").convert("RGBA")
         draw = ImageDraw.Draw(img)
-        result_fill = self._template_color(self.draw_design.get("result_card_color"), "#ffffff")
         pity_fill = self._template_color(self.draw_design.get("pity_card_color"), "#ffffff")
         draw.text((60, 45), "抽奖结果", font=self._font(56, True), fill="white")
         drawer = str(player.get("name") or player.get("user_id") or "玩家")[:20]
         draw.text((62, 112), f"抽奖人：{drawer}    消耗：{coin_cost} 星币 / 固定 {DRAW_COUNT} 抽    余额：{player['coins']} 星币", font=self._font(22), fill="#eaf2ff")
 
-        state = player.get("draw_state", {})
+        state = self._draw_state_for(player, scope_id)
         pity_count = max(0, min(DRAW_PITY_TARGET, int(state.get("pity_count", 0) or 0)))
         percentage = pity_count / DRAW_PITY_TARGET
         draw.rounded_rectangle((795, 42, 1125, 150), radius=18, fill=pity_fill, outline=(255, 255, 255, 150), width=2)
@@ -3527,9 +3734,7 @@ class JubenNpcPlugin(Star):
         if percentage:
             draw.rounded_rectangle((824, 102, 824 + int(271 * percentage), 124), radius=11, fill="#7d9fc2")
         draw.text((1010, 62), f"{percentage * 100:.0f}%", font=self._font(22, True), fill="#567da7")
-        next_pity_kind = state.get("next_pity_kind", "random")
-        guarantee_text = "满 100 抽必得同伴或皮肤" if next_pity_kind == "random" else f"下次保底优先{('同伴' if next_pity_kind == COMPANION_KIND else '皮肤')}"
-        draw.text((824, 130), guarantee_text, font=self._font(16), fill="#657086")
+        draw.text((824, 130), "满 100 抽按本期缺失优先发放", font=self._font(16), fill="#657086")
 
         y = 178
         for index, result in enumerate(results, start=1):
@@ -3537,7 +3742,7 @@ class JubenNpcPlugin(Star):
             # Keep the former pool area empty so the operator can compose it
             # directly into the uploaded background without result cards
             # covering it.
-            draw.rounded_rectangle((60, y, 735, y + 88), radius=16, fill=result_fill, outline=(255, 255, 255, 150), width=2)
+            draw.rounded_rectangle((60, y, 735, y + 88), radius=16, fill=self._draw_result_card_fill(result), outline=(255, 255, 255, 150), width=2)
             thumbnail = self._asset_thumbnail(str(result.get("image") or ""), (67, 44))
             if thumbnail:
                 img.alpha_composite(thumbnail, (78, y + 18))

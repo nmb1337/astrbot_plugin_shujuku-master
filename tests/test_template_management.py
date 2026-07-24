@@ -386,7 +386,7 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertEqual(result["entry_id"], "new_skin")
         self.assertEqual(result["kind"], "保底皮肤")
         self.assertEqual(player["draw_state"]["pity_count"], 0)
-        self.assertEqual(player["draw_state"]["next_pity_kind"], PLUGIN.COMPANION_KIND)
+        self.assertEqual(player["draw_state"]["next_pity_kind"], "random")
 
     def test_legacy_opening_state_is_removed_for_players_with_companions(self):
         instance = plugin_instance()
@@ -452,7 +452,10 @@ class TemplateManagementTests(unittest.TestCase):
         design = instance._normalize_draw_design({"background_image": "../draw.png", "result_card_color": "#123456", "pity_card_color": "invalid"})
 
         self.assertEqual(design["background_image"], "draw.png")
-        self.assertEqual(design["result_card_color"], "#123456")
+        self.assertEqual(design["pool_id"], "default")
+        self.assertEqual(design["experience_ball_card_color"], "#123456")
+        self.assertEqual(design["item_card_color"], "#123456")
+        self.assertEqual(design["jackpot_card_color"], "#123456")
         self.assertEqual(design["pity_card_color"], "#ffffff")
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -481,13 +484,144 @@ class TemplateManagementTests(unittest.TestCase):
             instance.font_dir = directory / "fonts"; instance.font_dir.mkdir()
             Image.new("RGB", (1180, 760), "#123456").save(instance.draw_assets_dir / "draw.png")
             Image.new("RGB", (1280, 720), "#456789").save(instance.mining_assets_dir / "mining.png")
-            instance.draw_design = {"background_image": "draw.png", "result_card_color": "#ffffff", "pity_card_color": "#ffffff"}
+            instance.draw_design = {
+                "background_image": "draw.png", "pool_id": "default",
+                "experience_ball_card_color": "#ffffff", "item_card_color": "#ffffff",
+                "jackpot_card_color": "#ffffff", "pity_card_color": "#ffffff",
+            }
             draw_path = instance._render_draw(player, [result] * 5, 10, 0)
             mining_path = instance._render_mining(player, companion, item, {"background_images": ["mining.png"]})
             with Image.open(draw_path) as image:
                 self.assertEqual(image.getpixel((850, 220))[:3], image.getpixel((850, 260))[:3])
             with Image.open(mining_path) as image:
                 self.assertEqual(image.getpixel((60, 54))[:3], (69, 103, 137))
+
+    def test_draw_result_cards_use_three_category_fill_colors(self):
+        instance = plugin_instance()
+        instance.characters = [{
+            "id": "linger", "kind": PLUGIN.COMPANION_KIND, "name": "灵儿", "image": "linger.png",
+            "colors": ["#123456", "#abcdef", "#0f172a"],
+        }]
+        instance.draw_design = {
+            "background_image": "", "pool_id": "summer_01",
+            "experience_ball_card_color": "#112233",
+            "item_card_color": "#445566",
+            "jackpot_card_color": "#778899",
+            "pity_card_color": "#ffffff",
+        }
+        player = {
+            "user_id": "1", "name": "测试", "coins": 20, "current_npc": "linger",
+            "npcs": {"linger": {"exp": 0}}, "skins": {}, "items": {},
+        }
+        results = [
+            {"name": "经验球", "kind": "经验球", "entry_kind": PLUGIN.EXPERIENCE_BALL_KIND, "exp": 10, "character_id": "linger", "image": ""},
+            {"name": "道具", "kind": "道具", "entry_kind": PLUGIN.ITEM_KIND, "exp": 0, "character_id": "linger", "image": ""},
+            {"name": "同伴", "kind": "同伴", "entry_kind": PLUGIN.COMPANION_KIND, "exp": 0, "character_id": "linger", "image": ""},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            instance.assets_dir = directory / "assets"; instance.assets_dir.mkdir()
+            instance.draw_assets_dir = directory / "draw"; instance.draw_assets_dir.mkdir()
+            instance.render_dir = directory / "rendered"; instance.render_dir.mkdir()
+            instance.font_dir = directory / "fonts"; instance.font_dir.mkdir()
+            path = instance._render_draw(player, results, 10, 0, "group-a")
+            with Image.open(path) as image:
+                fills = [image.getpixel((700, y))[:3] for y in (250, 352, 454)]
+
+        self.assertEqual(fills, [(17, 34, 51), (68, 85, 102), (119, 136, 153)])
+
+    def test_pity_prefers_missing_current_pool_rewards_and_uses_duplicate_exp_after_completion(self):
+        instance = plugin_instance()
+        other = {"id": "other", "kind": PLUGIN.COMPANION_KIND, "name": "已有同伴", "in_pool": False, "colors": ["#123456"]}
+        companion = {"id": "featured", "kind": PLUGIN.COMPANION_KIND, "name": "本期同伴", "in_pool": True, "colors": ["#123456"]}
+        skin = {"id": "featured_skin", "kind": PLUGIN.SKIN_KIND, "name": "本期皮肤", "parent_id": "featured", "in_pool": True, "colors": ["#123456"]}
+        instance.characters = [other, companion, skin]
+
+        def player(npcs, skins):
+            return {
+                "current_npc": "other", "npcs": npcs, "skins": skins, "items": {},
+                "draw_state": {"pity_count": PLUGIN.DRAW_PITY_TARGET - 1, "next_pity_kind": PLUGIN.SKIN_KIND},
+            }
+
+        both_missing = player({"other": {"exp": 0}}, {})
+        with patch.object(PLUGIN.random, "choice", side_effect=lambda choices: choices[0]):
+            result = instance._roll_draw(both_missing, "group-a", "pool-a")
+        self.assertEqual(result["entry_id"], "featured")
+
+        companion_missing = player({"other": {"exp": 0}}, {"featured_skin": {}})
+        result = instance._roll_draw(companion_missing, "group-a", "pool-a")
+        self.assertEqual(result["entry_id"], "featured")
+
+        skin_missing = player({"other": {"exp": 0}, "featured": {"exp": 0}}, {})
+        result = instance._roll_draw(skin_missing, "group-a", "pool-a")
+        self.assertEqual(result["entry_id"], "featured_skin")
+
+        complete = player({"other": {"exp": 0}, "featured": {"exp": 0}}, {"featured_skin": {}})
+        result = instance._roll_draw(complete, "group-a", "pool-a")
+        self.assertEqual(result["kind"], "保底重复奖励转经验")
+        self.assertEqual(result["exp"], 20)
+        self.assertEqual(complete["npcs"]["other"]["exp"], 20)
+        self.assertEqual(complete["draw_pity_states"]["group-a"]["pool-a"]["pity_count"], 0)
+
+    def test_player_assets_are_shared_across_groups_but_pity_isolated_by_scope_and_pool(self):
+        instance = plugin_instance()
+        instance.db = {"schema_version": 4, "scopes": {}, "players": {}}
+
+        group_a = instance._get_player_by_scope("group-a", "10001", "测试玩家")
+        group_a["coins"] = 42
+        group_a["npcs"]["linger"] = {"exp": 80}
+        group_a["items"]["bandage"] = {"count": 2}
+        group_b = instance._get_player_by_scope("group-b", "10001", "测试玩家")
+
+        self.assertIs(group_a, group_b)
+        self.assertEqual(group_b["coins"], 42)
+        self.assertEqual(group_b["npcs"]["linger"]["exp"], 80)
+        self.assertEqual(group_b["items"]["bandage"]["count"], 2)
+
+        state_a = instance._draw_state_for(group_a, "group-a", "pool-one")
+        state_a["pity_count"] = 9
+        self.assertEqual(instance._draw_state_for(group_b, "group-b", "pool-one")["pity_count"], 0)
+        self.assertEqual(instance._draw_state_for(group_b, "group-a", "pool-two")["pity_count"], 0)
+        self.assertEqual(instance._draw_state_for(group_b, "group-a", "pool-one")["pity_count"], 9)
+
+    def test_v4_migration_merges_legacy_assets_and_keeps_scope_pity_records(self):
+        instance = plugin_instance()
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            instance.data_dir = directory
+            instance.db_path = directory / "players.json"
+            instance.db = {
+                "schema_version": 3,
+                "scopes": {
+                    "group-a": {"players": {
+                        "10001": {
+                            "name": "测试玩家", "coins": 10, "tickets": 1,
+                            "npcs": {"linger": {"exp": 20, "owned_at": "2026-01-02"}},
+                            "skins": {}, "items": {"bandage": {"count": 1}}, "exclusive_items": {},
+                            "draw_state": {"pity_count": 7, "next_pity_kind": "random"},
+                        },
+                    }},
+                    "group-b": {"players": {
+                        "10001": {
+                            "name": "测试玩家", "coins": 25, "tickets": 0,
+                            "npcs": {"linger": {"exp": 80, "owned_at": "2026-01-03"}},
+                            "skins": {"linger_skin": {"owned_at": "2026-01-04"}},
+                            "items": {"bandage": {"count": 3}}, "exclusive_items": {},
+                            "draw_state": {"pity_count": 15, "next_pity_kind": "random"},
+                        },
+                    }},
+                },
+            }
+            instance._migrate_database()
+
+        shared = instance.db["players"]["10001"]
+        self.assertEqual(instance.db["schema_version"], 4)
+        self.assertEqual(shared["coins"], 25)
+        self.assertEqual(shared["npcs"]["linger"]["exp"], 80)
+        self.assertEqual(shared["items"]["bandage"]["count"], 3)
+        self.assertIn("linger_skin", shared["skins"])
+        self.assertEqual(shared["draw_pity_states"]["group-a"]["default"]["pity_count"], 7)
+        self.assertEqual(shared["draw_pity_states"]["group-b"]["default"]["pity_count"], 15)
 
     def test_cute_template_font_has_a_real_font_file(self):
         instance = plugin_instance()
