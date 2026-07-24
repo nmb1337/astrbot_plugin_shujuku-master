@@ -401,6 +401,77 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertFalse(player["draw_state"]["starter_pending"])
         self.assertFalse(player["draw_state"]["starter_skin_pending"])
 
+    def test_gift_commands_require_an_explicit_qq_whitelist(self):
+        instance = plugin_instance()
+
+        class Event:
+            def __init__(self, user_id):
+                self.user_id = user_id
+
+            def get_sender_id(self):
+                return self.user_id
+
+            def get_sender_name(self):
+                return self.user_id
+
+            def is_admin(self):
+                return True
+
+        instance.gift_operator_ids = []
+        allowed, message = asyncio.run(instance._ensure_operator_permission(Event("10001")))
+        self.assertFalse(allowed)
+        self.assertIn("白名单", message)
+
+        instance.gift_operator_ids = ["10001"]
+        allowed, _ = asyncio.run(instance._ensure_operator_permission(Event("10001")))
+        self.assertTrue(allowed)
+        denied, message = asyncio.run(instance._ensure_operator_permission(Event("10002")))
+        self.assertFalse(denied)
+        self.assertIn("不在", message)
+
+        ids, invalid = instance._parse_gift_operator_ids("10001, 10002\n10001, abc, 123")
+        self.assertEqual(ids, ["10001", "10002"])
+        self.assertEqual(invalid, ["abc", "123"])
+
+    def test_draw_rates_are_configurable_and_must_total_one_hundred(self):
+        instance = plugin_instance()
+        instance.draw_design = instance._normalize_draw_design({
+            "experience_rate": 20,
+            "item_rate": 30,
+            "companion_rate": 40,
+            "skin_rate": 10,
+        }, strict_rates=True)
+        self.assertEqual(instance._draw_rates(), {
+            "experience_rate": 20.0,
+            "item_rate": 30.0,
+            "companion_rate": 40.0,
+            "skin_rate": 10.0,
+        })
+        with self.assertRaises(ValueError):
+            instance._normalize_draw_design({
+                "experience_rate": 20,
+                "item_rate": 30,
+                "companion_rate": 40,
+                "skin_rate": 9,
+            }, strict_rates=True)
+
+        companion = {"id": "featured", "kind": PLUGIN.COMPANION_KIND, "name": "同伴", "in_pool": True, "colors": ["#123456"]}
+        skin = {"id": "featured_skin", "kind": PLUGIN.SKIN_KIND, "name": "皮肤", "parent_id": "featured", "in_pool": True, "colors": ["#123456"]}
+        item = {"id": "item", "kind": PLUGIN.ITEM_KIND, "name": "道具", "in_pool": True, "draw_weight": 1, "colors": ["#123456"]}
+        instance.characters = [companion, skin, item]
+        instance._roll_experience_ball = lambda *_: {"entry_id": "experience"}
+        instance._grant_draw_entry = lambda _player, entry, _label: {"entry_id": entry["id"]}
+
+        def roll_at(value):
+            player = {"current_npc": "featured", "npcs": {"featured": {"exp": 0}}, "skins": {}, "items": {}}
+            with patch.object(PLUGIN.random, "random", return_value=value), patch.object(PLUGIN.random, "choices", return_value=[item]), patch.object(PLUGIN.random, "choice", side_effect=lambda entries: entries[0]):
+                return instance._roll_draw(player)["entry_id"]
+
+        self.assertEqual(roll_at(0.199), "experience")
+        self.assertEqual(roll_at(0.20), "item")
+        self.assertEqual(roll_at(0.50), "featured")
+        self.assertEqual(roll_at(0.90), "featured_skin")
+
     def test_experience_ball_entries_are_weighted_inside_the_experience_slot(self):
         instance = plugin_instance()
         instance.characters = [
@@ -457,6 +528,10 @@ class TemplateManagementTests(unittest.TestCase):
         self.assertEqual(design["item_card_color"], "#123456")
         self.assertEqual(design["jackpot_card_color"], "#123456")
         self.assertEqual(design["pity_card_color"], "#ffffff")
+        self.assertEqual(design["experience_rate"], 86)
+        self.assertEqual(design["item_rate"], 13)
+        self.assertEqual(design["companion_rate"], 0.5)
+        self.assertEqual(design["skin_rate"], 0.5)
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             instance.render_dir = directory

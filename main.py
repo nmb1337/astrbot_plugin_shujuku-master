@@ -2,6 +2,7 @@ import base64
 import copy
 import json
 import inspect
+import math
 import os
 import random
 import re
@@ -27,6 +28,13 @@ DRAW_EXPERIENCE_RATE = 86
 DRAW_ITEM_RATE = 13
 DRAW_COMPANION_RATE = 0.5
 DRAW_SKIN_RATE = 0.5
+DRAW_RATE_DEFAULTS = {
+    "experience_rate": DRAW_EXPERIENCE_RATE,
+    "item_rate": DRAW_ITEM_RATE,
+    "companion_rate": DRAW_COMPANION_RATE,
+    "skin_rate": DRAW_SKIN_RATE,
+}
+DRAW_RATE_KEYS = tuple(DRAW_RATE_DEFAULTS)
 CHECKIN_MESSAGE_LIMIT = 5
 WINNING_NUMBER_MIN = 1
 WINNING_NUMBER_MAX = 100
@@ -190,6 +198,7 @@ class JubenNpcPlugin(Star):
         self.mining_templates_path = self.data_dir / "mining_templates.json"
         self.draw_design_path = self.data_dir / "draw_design.json"
         self.settings_path = self.data_dir / "settings.json"
+        self.gift_operators_path = self.data_dir / "gift_operators.json"
         self.db: Dict[str, Any] = {"schema_version": 4, "scopes": {}, "players": {}}
         self.characters: List[Dict[str, Any]] = []
         self.checkin_templates: List[Dict[str, Any]] = []
@@ -197,6 +206,7 @@ class JubenNpcPlugin(Star):
         self.mining_templates: List[Dict[str, Any]] = []
         self.draw_design: Dict[str, Any] = self._default_draw_design()
         self.settings: Dict[str, str] = dict(DEFAULT_VISUAL_SETTINGS)
+        self.gift_operator_ids: List[str] = []
         self._font_cache: Dict[Tuple[int, bool, str], ImageFont.FreeTypeFont] = {}
         self._warned_missing_font = False
         self._register_page_apis(context)
@@ -217,6 +227,7 @@ class JubenNpcPlugin(Star):
         self._load_mining_templates()
         self._load_draw_design()
         self._load_settings()
+        self._load_gift_operators()
         self._ensure_fonts()
         self._ensure_assets()
         logger.info("剧本杀同伴与皮肤数据库插件已加载。")
@@ -229,15 +240,16 @@ class JubenNpcPlugin(Star):
         self._save_mining_templates()
         self._save_draw_design()
         self._save_settings()
+        self._save_gift_operators()
 
     async def help_cmd(self, event: AstrMessageEvent):
         path = self._render_text_card(
             "剧本杀同伴数据库",
             [
                 "打卡 - 直接触发，每天随机领取 1-5 星币",
-                "/赠送星币 @群友 数量 - 管理员发放星币",
-                "/赠送同伴 @群友 名称 - 管理员赠送同伴或皮肤",
-                "/赠送专属 @群友 同伴名 - 管理员赠送同伴专属物品",
+                "/赠送星币 @群友 数量 - 白名单 QQ 发放星币",
+                "/赠送同伴 @群友 名称 - 白名单 QQ 赠送同伴或皮肤",
+                "/赠送专属 @群友 同伴名 - 白名单 QQ 赠送同伴专属物品",
                 "状态栏 - 直接触发，查看当前同伴状态",
                 "/切换同伴 名称 - 更换当前同伴或装备皮肤（/切换角色 仍兼容）",
                 "抽奖 - 直接触发，消耗 10 星币进行 5 抽",
@@ -622,6 +634,7 @@ class JubenNpcPlugin(Star):
                     ],
                     "players": self._known_players(),
                     "settings": self.settings,
+                    "gift_operator_ids": self.gift_operator_ids,
                     "checkin_templates": [
                         {
                             **template,
@@ -870,9 +883,24 @@ class JubenNpcPlugin(Star):
 
         async def save_draw_design():
             data = (await request.get_json()) or {}
-            self.draw_design = self._normalize_draw_design(data)
+            try:
+                self.draw_design = self._normalize_draw_design(data, strict_rates=True)
+            except ValueError as exc:
+                return jsonify({"status": "error", "message": str(exc)}), 400
             self._save_draw_design()
             return jsonify({"ok": True, "draw_design": self.draw_design})
+
+        async def save_gift_operators():
+            data = (await request.get_json()) or {}
+            operator_ids, invalid_ids = self._parse_gift_operator_ids(data.get("operator_ids", []))
+            if invalid_ids:
+                return jsonify({
+                    "status": "error",
+                    "message": f"QQ 白名单仅支持 5-20 位数字；无效项：{', '.join(invalid_ids[:5])}",
+                }), 400
+            self.gift_operator_ids = operator_ids
+            self._save_gift_operators()
+            return jsonify({"ok": True, "operator_ids": self.gift_operator_ids})
 
         async def upload_draw_image():
             file = await self._request_upload_file()
@@ -1049,6 +1077,7 @@ class JubenNpcPlugin(Star):
         context.register_web_api(f"/{PLUGIN_NAME}/upload-mining-image/data-url", upload_mining_image_data_url, ["POST"], "Upload mining image fallback")
         context.register_web_api(f"/{PLUGIN_NAME}/draw-design", get_draw_design, ["GET"], "Get draw design")
         context.register_web_api(f"/{PLUGIN_NAME}/draw-design", save_draw_design, ["POST"], "Save draw design")
+        context.register_web_api(f"/{PLUGIN_NAME}/gift-operators", save_gift_operators, ["POST"], "Save gift operator QQ whitelist")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-draw-image", upload_draw_image, ["POST"], "Upload draw image")
         context.register_web_api(f"/{PLUGIN_NAME}/upload-draw-image/data-url", upload_draw_image_data_url, ["POST"], "Upload draw image fallback")
         context.register_web_api(f"/{PLUGIN_NAME}/grant", grant_character, ["POST"], "Grant NPC character")
@@ -1294,6 +1323,45 @@ class JubenNpcPlugin(Star):
         self._save_settings()
         return self.settings
 
+    @staticmethod
+    def _parse_gift_operator_ids(value: Any) -> Tuple[List[str], List[str]]:
+        """Parse and de-duplicate the QQ-only chat gifting whitelist."""
+        raw_values = re.split(r"[\s,，;；]+", value) if isinstance(value, str) else value
+        if not isinstance(raw_values, (list, tuple, set)):
+            raw_values = []
+        operator_ids: List[str] = []
+        invalid_ids: List[str] = []
+        for raw_value in raw_values:
+            user_id = str(raw_value or "").strip()
+            if not user_id:
+                continue
+            if not re.fullmatch(r"\d{5,20}", user_id):
+                invalid_ids.append(user_id[:40])
+                continue
+            if user_id not in operator_ids:
+                operator_ids.append(user_id)
+        return operator_ids[:100], invalid_ids[:20]
+
+    def _load_gift_operators(self):
+        self.gift_operator_ids = []
+        if not self.gift_operators_path.exists():
+            self._save_gift_operators()
+            return
+        try:
+            raw = json.loads(self.gift_operators_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.error(f"读取赠送 QQ 白名单失败，将禁用聊天赠送：{exc}")
+            raw = {}
+        values = raw.get("operator_ids", []) if isinstance(raw, dict) else raw
+        self.gift_operator_ids, invalid_ids = self._parse_gift_operator_ids(values)
+        if invalid_ids:
+            logger.warning("赠送 QQ 白名单包含无效项，已忽略：%s", ", ".join(invalid_ids))
+        self._save_gift_operators()
+
+    def _save_gift_operators(self):
+        self.data_dir.mkdir(exist_ok=True)
+        self._write_json_atomic(self.gift_operators_path, {"operator_ids": self.gift_operator_ids})
+
     def _default_checkin_template(self) -> Dict[str, Any]:
         return {
             "id": "default",
@@ -1363,6 +1431,7 @@ class JubenNpcPlugin(Star):
         return {
             "background_image": "",
             "pool_id": "default",
+            **DRAW_RATE_DEFAULTS,
             "experience_ball_card_color": "#ffffff",
             "item_card_color": "#ffffff",
             "jackpot_card_color": "#ffffff",
@@ -1483,12 +1552,36 @@ class JubenNpcPlugin(Star):
         base["background_images"] = [Path(str(item)).name for item in images if str(item).strip()][:6] if isinstance(images, (list, tuple)) else []
         return base
 
-    def _normalize_draw_design(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _normalize_draw_rates(data: Dict[str, Any], strict: bool = False) -> Dict[str, float]:
+        """Validate the four draw brackets and require a complete 100% table."""
+        if not any(key in data for key in DRAW_RATE_KEYS):
+            return dict(DRAW_RATE_DEFAULTS)
+        rates: Dict[str, float] = {}
+        for key, default in DRAW_RATE_DEFAULTS.items():
+            raw_value = data.get(key)
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                value = math.nan
+            if not math.isfinite(value) or value < 0 or value > 100:
+                if strict:
+                    raise ValueError("抽奖概率必须是 0 到 100 之间的数字。")
+                return dict(DRAW_RATE_DEFAULTS)
+            rates[key] = round(value, 4)
+        if abs(sum(rates.values()) - 100) > 0.0001:
+            if strict:
+                raise ValueError("经验球、道具、同伴、皮肤概率之和必须等于 100%。")
+            return dict(DRAW_RATE_DEFAULTS)
+        return rates
+
+    def _normalize_draw_design(self, data: Dict[str, Any], strict_rates: bool = False) -> Dict[str, Any]:
         base = self._default_draw_design()
         background = Path(str(data.get("background_image") or "")).name
         base["background_image"] = background
         pool_id = "".join(ch for ch in str(data.get("pool_id") or "") if ord(ch) >= 32 and ch != "\\").strip()
         base["pool_id"] = pool_id[:80] or "default"
+        base.update(self._normalize_draw_rates(data, strict=strict_rates))
 
         # A previous version exposed one shared result-card color.  Promote it
         # to all three result categories once so old designs retain their look
@@ -1876,46 +1969,17 @@ class JubenNpcPlugin(Star):
         return self._render_text_card(
             f"{action}：权限不足",
             [message],
-            subtitle="该操作会直接改变玩家资产，仅限本群群主、群管理员或 AstrBot 管理员。",
+            subtitle="该操作会直接改变玩家资产，仅限第六板块配置的赠送 QQ 白名单。",
         )
 
     async def _ensure_operator_permission(self, event: AstrMessageEvent) -> Tuple[bool, str]:
-        """Allow AstrBot admins or real-time verified QQ group owners/admins."""
-        is_admin = getattr(event, "is_admin", None)
-        if callable(is_admin):
-            try:
-                if is_admin():
-                    return True, "AstrBot 管理员授权。"
-            except Exception:
-                pass
-
-        group_id = self._group_id(event)
+        """Allow gift commands only for QQ IDs explicitly configured in Page six."""
         sender_id = self._sender_id(event)
-        if not group_id or not sender_id:
-            return False, "私聊中仅 AstrBot 管理员可以执行该操作。"
-
-        try:
-            group_number = int(group_id)
-            sender_number = int(sender_id)
-        except (TypeError, ValueError):
-            return False, "无法识别群号或发送者 QQ，已拒绝执行。"
-
-        ok, info = await self._onebot_call_raw(
-            event,
-            "get_group_member_info",
-            group_id=group_number,
-            user_id=sender_number,
-            no_cache=True,
-        )
-        if not ok:
-            return False, "无法实时验证你的 QQ 群权限，已拒绝执行。"
-
-        if isinstance(info, dict) and isinstance(info.get("data"), dict):
-            info = info["data"]
-        role = str(info.get("role") or "").lower() if isinstance(info, dict) else ""
-        if role in {"owner", "admin"}:
-            return True, f"已验证 QQ 群权限：{role}。"
-        return False, "仅本群群主、群管理员或 AstrBot 管理员可以执行该操作。"
+        if not self.gift_operator_ids:
+            return False, "赠送 QQ 白名单尚未配置；请在第六板块填写允许操作的 QQ。"
+        if sender_id in self.gift_operator_ids:
+            return True, "赠送 QQ 白名单授权。"
+        return False, "你的 QQ 不在第六板块的赠送白名单内。"
 
     @staticmethod
     async def _onebot_call_raw(event: AstrMessageEvent, action: str, **payload: Any) -> Tuple[bool, Any]:
@@ -2174,6 +2238,10 @@ class JubenNpcPlugin(Star):
         design = getattr(self, "draw_design", {})
         value = str(design.get("pool_id") or "default") if isinstance(design, dict) else "default"
         return "".join(ch for ch in value if ord(ch) >= 32 and ch != "\\").strip()[:80] or "default"
+
+    def _draw_rates(self) -> Dict[str, float]:
+        design = getattr(self, "draw_design", {})
+        return self._normalize_draw_rates(design if isinstance(design, dict) else {})
 
     def _draw_state_for(self, player: Dict[str, Any], scope_id: str, pool_id: Optional[str] = None) -> Dict[str, Any]:
         """Return the independent guarantee state for one conversation and pool."""
@@ -2662,7 +2730,7 @@ class JubenNpcPlugin(Star):
         """Resolve a fully-paid draw with no empty result slots.
 
         Only accounts without a companion receive the opening companion/skin
-        guide.  Established players always use the public 86/13/0.5/0.5
+        guide. Established players use the operator-configured four-bracket
         table, plus a guarantee state isolated by conversation and pool_id.
         """
         current_id = str(player.get("current_npc") or "")
@@ -2715,16 +2783,16 @@ class JubenNpcPlugin(Star):
                 "image": current.get("image", ""),
             }
 
+        rates = self._draw_rates()
         roll = random.random() * 100
         cursor = 0.0
-        cursor += DRAW_EXPERIENCE_RATE
+        cursor += rates["experience_rate"]
         if roll < cursor:
             return self._roll_experience_ball(player, current_id)
 
-        # The former normal/intermediate/advanced buckets total 13%.  Keep
-        # that overall chance but choose from every checked item by its own
+        # Items use the configured bracket, then select an entry by its own
         # operator-configured weight.
-        cursor += DRAW_ITEM_RATE
+        cursor += rates["item_rate"]
         if roll < cursor:
             pool = self._draw_pool(ITEM_KIND)
             if not pool:
@@ -2732,15 +2800,14 @@ class JubenNpcPlugin(Star):
             weights = [max(1, int(entry.get("draw_weight", 10) or 10)) for entry in pool]
             return self._grant_draw_entry(player, random.choices(pool, weights=weights, k=1)[0], "道具")
 
-        cursor += DRAW_COMPANION_RATE
+        cursor += rates["companion_rate"]
         if roll < cursor:
             if companion_pool:
                 state["pity_count"] = 0
                 state["next_pity_kind"] = "random"
                 return self._grant_draw_entry(player, random.choice(companion_pool), "同伴")
 
-        # The preceding branches cover 99.5%; the final branch (including any
-        # float roundoff at exactly 100) always resolves to a skin.
+        # The validated four brackets total 100%; the final branch is skin.
         state["pity_count"] = 0
         state["next_pity_kind"] = "random"
         return self._grant_draw_entry(player, random.choice(skin_pool), "皮肤")

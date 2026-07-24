@@ -31,6 +31,7 @@ let checkinTemplates = [];
 let statusTemplates = [];
 let miningTemplates = [];
 let drawDesign = {};
+let giftOperatorIds = [];
 let checkinAssets = [];
 let statusAssets = [];
 let selectedId = '';
@@ -151,6 +152,7 @@ async function loadAll() {
   statusAssets = payload.status_assets || [];
   miningTemplates = payload.mining_templates || [];
   drawDesign = payload.draw_design || drawDesign;
+  giftOperatorIds = payload.gift_operator_ids || [];
   if (!selectedId && characters[0]) selectedId = characters[0].id;
   if (!selectedCheckinId && checkinTemplates[0]) selectedCheckinId = checkinTemplates[0].id;
   if (!selectedStatusId && statusTemplates[0]) selectedStatusId = statusTemplates[0].id;
@@ -160,7 +162,7 @@ async function loadAll() {
   renderTemplateList('checkin'); fillTemplate('checkin', checkinTemplates.find((entry) => entry.id === selectedCheckinId) || checkinTemplates[0]);
   renderTemplateList('status'); fillTemplate('status', statusTemplates.find((entry) => entry.id === selectedStatusId) || statusTemplates[0]);
   renderMiningTemplateList(); fillMiningTemplate(miningTemplates.find((entry) => entry.id === selectedMiningId) || miningTemplates[0]);
-  fillDrawDesign(drawDesign);
+  fillDrawDesign(drawDesign); fillGiftOperatorIds();
   renderTemplateAssetList('checkin'); renderTemplateAssetList('status');
 }
 
@@ -579,6 +581,10 @@ function fillDrawDesign(design) {
   setValue(form, 'experience_ball_card_color', data.experience_ball_card_color || legacyColor);
   setValue(form, 'item_card_color', data.item_card_color || legacyColor);
   setValue(form, 'jackpot_card_color', data.jackpot_card_color || legacyColor);
+  setValue(form, 'experience_rate', data.experience_rate ?? 86);
+  setValue(form, 'item_rate', data.item_rate ?? 13);
+  setValue(form, 'companion_rate', data.companion_rate ?? 0.5);
+  setValue(form, 'skin_rate', data.skin_rate ?? 0.5);
   const preview = $('#draw-design-preview');
   if (data.background_image) preview.src = assetUrl(data.background_image, 'draw-assets'); else preview.removeAttribute('src');
 }
@@ -590,8 +596,13 @@ function readDrawDesign() {
     experience_ball_card_color: form.elements.experience_ball_card_color.value,
     item_card_color: form.elements.item_card_color.value,
     jackpot_card_color: form.elements.jackpot_card_color.value,
+    experience_rate: numberValue(form.elements.experience_rate.value, NaN),
+    item_rate: numberValue(form.elements.item_rate.value, NaN),
+    companion_rate: numberValue(form.elements.companion_rate.value, NaN),
+    skin_rate: numberValue(form.elements.skin_rate.value, NaN),
   };
 }
+function fillGiftOperatorIds() { $('#gift-operator-ids').value = giftOperatorIds.join('\n'); }
 async function uploadDrawBackground(file) {
   if (!file?.type?.startsWith('image/')) { toast('请上传 PNG、JPG 或 WebP 图片。'); return; }
   const result = normalizeResponse(await upload('/upload-draw-image', file));
@@ -697,8 +708,17 @@ function bindEvents() {
   bindImageDropzone('#mining-background-dropzone', '#mining-background-upload', uploadMiningBackgrounds, 'pasted-mining-background.png');
 
   $('#save-draw-design').addEventListener('click', () => safely(async () => {
-    const result = normalizeResponse(await apiPost('/draw-design', readDrawDesign()));
+    const design = readDrawDesign(); const rates = [design.experience_rate, design.item_rate, design.companion_rate, design.skin_rate];
+    if (!rates.every((rate) => Number.isFinite(rate) && rate >= 0 && rate <= 100)) { toast('抽奖概率必须是 0 到 100 之间的数字。'); return; }
+    if (Math.abs(rates.reduce((sum, rate) => sum + rate, 0) - 100) > 0.0001) { toast('经验球、道具、同伴、皮肤概率之和必须等于 100%。'); return; }
+    const result = normalizeResponse(await apiPost('/draw-design', design));
     drawDesign = result.draw_design || readDrawDesign(); fillDrawDesign(drawDesign); toast('已保存抽奖设计。');
+  }));
+
+  $('#save-gift-operators').addEventListener('click', () => safely(async () => {
+    const operator_ids = $('#gift-operator-ids').value.split(/[\s,，;；]+/).map((value) => value.trim()).filter(Boolean);
+    const result = normalizeResponse(await apiPost('/gift-operators', { operator_ids }));
+    giftOperatorIds = result.operator_ids || []; fillGiftOperatorIds(); toast('已保存赠送 QQ 白名单。');
   }));
   bindImageDropzone('#draw-background-dropzone', '#draw-background-upload', uploadDrawBackground, 'pasted-draw-background.png');
 }

@@ -164,6 +164,10 @@
             <label>经验球结果卡填充色<input name="experience_ball_card_color" type="color" value="#ffffff" /></label>
             <label>道具结果卡填充色<input name="item_card_color" type="color" value="#ffffff" /></label>
             <label>大奖结果卡填充色<input name="jackpot_card_color" type="color" value="#ffffff" /></label>
+            <label>经验球概率（%）<input name="experience_rate" type="number" min="0" max="100" step="0.01" value="86" /></label>
+            <label>道具概率（%）<input name="item_rate" type="number" min="0" max="100" step="0.01" value="13" /></label>
+            <label>同伴概率（%）<input name="companion_rate" type="number" min="0" max="100" step="0.01" value="0.5" /></label>
+            <label>皮肤概率（%）<input name="skin_rate" type="number" min="0" max="100" step="0.01" value="0.5" /></label>
           </form>
           <div id="draw-background-dropzone" class="dropzone compact"><strong>上传抽奖全背景</strong><span>上传后直接应用到抽奖结果；不再显示同伴/皮肤奖池框。</span><input id="draw-background-upload" type="file" accept="image/png,image/jpeg,image/webp" /></div>
           <div class="upload-row"><button id="save-draw-design" type="button">保存抽奖设计</button></div><img id="draw-design-preview" class="template-preview draw-design-preview" alt="抽奖背景预览" />
@@ -174,6 +178,7 @@
         <div class="board-title"><div><span>第六板块</span><h2>玩家资产发放与扣除</h2><p>可发放或收回同伴、皮肤和道具；道具可按数量扣除。经验球不会出现在此处。</p></div></div>
         <section class="panel asset-panel">
           <div class="asset-grid">
+            <label class="wide">可使用聊天赠送指令的 QQ（每行或逗号一个）<textarea id="gift-operator-ids" rows="3" placeholder="例如：10001&#10;10002"></textarea><small>仅名单内 QQ 可使用 /赠送星币、/赠送同伴、/赠送专属；留空时全部禁用。</small></label><button id="save-gift-operators" type="button">保存赠送 QQ 白名单</button>
             <label>已记录玩家<select id="known-player"></select></label><label>群 / 会话 Scope ID<input id="asset-scope" placeholder="群号或 session id" /></label><label>用户 ID<input id="asset-user" placeholder="QQ / 平台用户 ID" /></label><label>昵称<input id="asset-name" placeholder="发放时可填写" /></label>
             <label>同伴 / 皮肤 / 道具<select id="asset-character"></select></label><label>道具扣除数量<input id="asset-amount" type="number" min="1" max="9999" value="1" /></label>
             <div class="asset-actions"><button id="grant-button" type="button">发放条目</button><button id="revoke-button" class="danger" type="button">扣除条目</button></div>
